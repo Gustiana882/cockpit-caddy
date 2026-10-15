@@ -9,32 +9,35 @@ import cockpit from 'cockpit';
 
 // PatternFly 6 Core Components
 import { Page, PageSection } from '@patternfly/react-core/dist/esm/components/Page/index.js';
-import { Card, CardBody, CardTitle, CardHeader } from '@patternfly/react-core/dist/esm/components/Card/index.js';
+import { Card, CardBody, CardTitle } from '@patternfly/react-core/dist/esm/components/Card/index.js';
 import { Button } from '@patternfly/react-core/dist/esm/components/Button/index.js';
 import { Label } from '@patternfly/react-core/dist/esm/components/Label/index.js';
-import { Badge } from '@patternfly/react-core/dist/esm/components/Badge/index.js';
-import { Alert, AlertGroup } from '@patternfly/react-core/dist/esm/components/Alert/index.js';
+import { Alert, AlertGroup, AlertActionCloseButton } from '@patternfly/react-core/dist/esm/components/Alert/index.js';
 import { Tabs, Tab, TabTitleText } from '@patternfly/react-core/dist/esm/components/Tabs/index.js';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '@patternfly/react-core/dist/esm/components/Modal/index.js';
-import { Form, FormGroup, ActionGroup } from '@patternfly/react-core/dist/esm/components/Form/index.js';
+import { Form, FormGroup } from '@patternfly/react-core/dist/esm/components/Form/index.js';
+import { FormHelperText } from '@patternfly/react-core/dist/esm/components/Form/index.js';
+import { HelperText, HelperTextItem } from '@patternfly/react-core/dist/esm/components/HelperText/index.js';
 import { TextInput } from '@patternfly/react-core/dist/esm/components/TextInput/index.js';
 import { TextArea } from '@patternfly/react-core/dist/esm/components/TextArea/index.js';
 import { Checkbox } from '@patternfly/react-core/dist/esm/components/Checkbox/index.js';
-import { EmptyState, EmptyStateBody, EmptyStateActions } from '@patternfly/react-core/dist/esm/components/EmptyState/index.js';
+import { SearchInput } from '@patternfly/react-core/dist/esm/components/SearchInput/index.js';
+import { EmptyState, EmptyStateBody, EmptyStateFooter, EmptyStateActions } from '@patternfly/react-core/dist/esm/components/EmptyState/index.js';
 import { Toolbar, ToolbarContent, ToolbarItem } from '@patternfly/react-core/dist/esm/components/Toolbar/index.js';
 import { Spinner } from '@patternfly/react-core/dist/esm/components/Spinner/index.js';
 import { CodeBlock, CodeBlockCode } from '@patternfly/react-core/dist/esm/components/CodeBlock/index.js';
+import { Content } from '@patternfly/react-core/dist/esm/components/Content/index.js';
+import { Title } from '@patternfly/react-core/dist/esm/components/Title/index.js';
+import { Flex, FlexItem } from '@patternfly/react-core/dist/esm/layouts/Flex/index.js';
+import { Table, Thead, Tbody, Tr, Th, Td, ActionsColumn } from '@patternfly/react-table/dist/esm/components/Table/index.js';
 
 // PatternFly Icons
 import SyncAltIcon from '@patternfly/react-icons/dist/esm/icons/sync-alt-icon.js';
 import PlusCircleIcon from '@patternfly/react-icons/dist/esm/icons/plus-circle-icon.js';
 import RedoIcon from '@patternfly/react-icons/dist/esm/icons/redo-icon.js';
-import TrashIcon from '@patternfly/react-icons/dist/esm/icons/trash-icon.js';
-import EditIcon from '@patternfly/react-icons/dist/esm/icons/edit-icon.js';
 import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon.js';
 import CheckCircleIcon from '@patternfly/react-icons/dist/esm/icons/check-circle-icon.js';
 import ExclamationCircleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-circle-icon.js';
-import ServerIcon from '@patternfly/react-icons/dist/esm/icons/server-icon.js';
 
 const _ = cockpit.gettext;
 
@@ -86,7 +89,7 @@ async function caddyRequest(path: string, method: string = 'GET', data: any = nu
                             resolve(responseBody);
                         }
                     } else {
-                        reject(new Error(`HTTP ${statusCode}: ${responseBody || 'Permintaan gagal'}`));
+                        reject(new Error(`HTTP ${statusCode}: ${responseBody || _("Permintaan gagal")}`));
                     }
                 })
                 .catch((err: any) => reject(err));
@@ -120,7 +123,7 @@ export const Application = () => {
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [alerts, setAlerts] = useState<NotificationAlert[]>([]);
 
-    // Modal state
+    // Modal state (tambah / edit)
     const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
     const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
     const [formDomains, setFormDomains] = useState<string>('');
@@ -129,16 +132,21 @@ export const Application = () => {
     const [formHeaders, setFormHeaders] = useState<boolean>(true);
     const [formSubmitting, setFormSubmitting] = useState<boolean>(false);
 
+    // Modal konfirmasi hapus
+    const [routeToDelete, setRouteToDelete] = useState<CaddyRoute | null>(null);
+    const [deleting, setDeleting] = useState<boolean>(false);
+
     // Raw JSON text state
     const [rawEditorText, setRawEditorText] = useState<string>('');
     const [savingRaw, setSavingRaw] = useState<boolean>(false);
 
     const addAlert = (title: string, variant: 'success' | 'danger' | 'warning' | 'info' = 'info', message?: string) => {
-        const id = Date.now();
+        const id = Date.now() + Math.random();
         setAlerts(prev => [...prev, { id, title, variant, message }]);
-        setTimeout(() => {
-            setAlerts(prev => prev.filter(a => a.id !== id));
-        }, 4000);
+    };
+
+    const removeAlert = (id: number) => {
+        setAlerts(prev => prev.filter(a => a.id !== id));
     };
 
     // Load Caddy Config
@@ -192,7 +200,7 @@ export const Application = () => {
                                     hasRealId: !!route['@id'],
                                     serverKey: sKey,
                                     routeIndex: index,
-                                    hosts: hosts.length > 0 ? hosts : ['* (All Hosts)'],
+                                    hosts: hosts.length > 0 ? hosts : [_("* (Semua host)")],
                                     upstreams,
                                     rawRoute: route,
                                     isHttps,
@@ -229,20 +237,6 @@ export const Application = () => {
         );
     }, [routes, searchQuery]);
 
-    // Statistics
-    const stats = useMemo(() => {
-        const totalRoutes = routes.length;
-        let totalUpstreams = 0;
-        let httpsCount = 0;
-
-        routes.forEach(r => {
-            totalUpstreams += (r.upstreams.length || 1);
-            if (r.isHttps) httpsCount++;
-        });
-
-        return { totalRoutes, totalUpstreams, httpsCount };
-    }, [routes]);
-
     // Modal controls
     const openAddModal = () => {
         setEditingRouteId(null);
@@ -272,7 +266,7 @@ export const Application = () => {
         e.preventDefault();
         const domains = formDomains.split(',').map(d => d.trim()).filter(Boolean);
         const upstreamsList = formUpstreams.split(',').map(u => {
-            let clean = u.trim().replace(/^https?:\/\//, '');
+            const clean = u.trim().replace(/^https?:\/\//, '');
             return { dial: clean };
         }).filter(u => u.dial);
 
@@ -312,17 +306,17 @@ export const Application = () => {
                     await deleteRouteInternal(editingRouteId);
                     await addRouteToCaddy(newRoute);
                 }
-                addAlert(_("Berhasil!"), "success", `Reverse proxy ${domains[0]} berhasil diperbarui.`);
+                addAlert(_("Berhasil"), "success", `Reverse proxy ${domains[0]} berhasil diperbarui.`);
             } else {
                 await addRouteToCaddy(newRoute);
-                addAlert(_("Berhasil!"), "success", `Reverse proxy ${domains[0]} berhasil ditambahkan.`);
+                addAlert(_("Berhasil"), "success", `Reverse proxy ${domains[0]} berhasil ditambahkan.`);
             }
 
             closeModal();
             await loadConfig();
         } catch (err: any) {
             console.error('Error saving route:', err);
-            addAlert(_("Gagal Menyimpan"), "danger", err.message);
+            addAlert(_("Gagal menyimpan"), "danger", err.message);
         } finally {
             setFormSubmitting(false);
         }
@@ -350,19 +344,21 @@ export const Application = () => {
         }
     };
 
-    const handleDeleteRoute = async (route: CaddyRoute) => {
-        const domainStr = route.hosts.join(', ');
-        if (!confirm(`Apakah Anda yakin ingin menghapus proxy untuk "${domainStr}"?`)) {
-            return;
-        }
+    const handleConfirmDelete = async () => {
+        if (!routeToDelete) return;
+        const domainStr = routeToDelete.hosts.join(', ');
 
+        setDeleting(true);
         try {
-            await deleteRouteInternal(route.id);
+            await deleteRouteInternal(routeToDelete.id);
             addAlert(_("Terhapus"), "success", `Proxy ${domainStr} berhasil dihapus.`);
+            setRouteToDelete(null);
             await loadConfig();
         } catch (err: any) {
             console.error('Failed to delete route:', err);
-            addAlert(_("Gagal Menghapus"), "danger", err.message);
+            addAlert(_("Gagal menghapus"), "danger", err.message);
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -373,14 +369,14 @@ export const Application = () => {
             const isCockpit = typeof cockpit !== 'undefined' && typeof cockpit.spawn === 'function';
             if (isCockpit) {
                 await cockpit.spawn(['systemctl', 'reload', 'caddy'], { superuser: 'try' });
-                addAlert(_("Sukses!"), "success", _("Caddy berhasil di-reload via systemctl"));
+                addAlert(_("Sukses"), "success", _("Caddy berhasil di-reload via systemctl"));
             } else {
                 await caddyRequest('/load', 'POST', rawConfig);
-                addAlert(_("Sukses!"), "success", _("Caddy config reloaded via Admin API"));
+                addAlert(_("Sukses"), "success", _("Konfigurasi Caddy dimuat ulang via Admin API"));
             }
             await loadConfig();
         } catch (err: any) {
-            addAlert(_("Gagal Reload Caddy"), "danger", err.message);
+            addAlert(_("Gagal reload Caddy"), "danger", err.message);
         }
     };
 
@@ -390,10 +386,10 @@ export const Application = () => {
         try {
             const parsed = JSON.parse(rawEditorText);
             await caddyRequest('/load', 'POST', parsed);
-            addAlert(_("Konfigurasi Diterapkan"), "success", _("Caddy JSON config berhasil diperbarui"));
+            addAlert(_("Konfigurasi diterapkan"), "success", _("Konfigurasi JSON Caddy berhasil diperbarui"));
             await loadConfig();
         } catch (err: any) {
-            addAlert(_("Format JSON Tidak Valid"), "danger", err.message);
+            addAlert(_("Gagal menerapkan konfigurasi"), "danger", err.message);
         } finally {
             setSavingRaw(false);
         }
@@ -408,7 +404,7 @@ export const Application = () => {
         document.body.appendChild(a);
         a.click();
         a.remove();
-        addAlert(_("Download Dimulai"), "info", _("File konfigurasi backup diunduh."));
+        addAlert(_("Unduhan dimulai"), "info", _("File konfigurasi backup diunduh."));
     };
 
     // Generate Caddyfile preview
@@ -425,317 +421,246 @@ export const Application = () => {
         return out;
     }, [routes]);
 
-    return (
-        <Page className="pf-m-no-sidebar" style={{ background: 'var(--pf-v6-global--BackgroundColor--100, #ffffff)' }}>
-            {/* Notification Toast AlertGroup */}
-            <div style={{ position: 'fixed', top: '16px', right: '16px', zIndex: 9999, minWidth: '320px' }}>
-                <AlertGroup isToast isLiveRegion>
-                    {alerts.map(a => (
-                        <Alert
-                            key={a.id}
-                            variant={a.variant}
-                            title={a.title}
-                            actionClose={
-                                <Button
-                                    variant="plain"
-                                    onClick={() => setAlerts(prev => prev.filter(item => item.id !== a.id))}
-                                >
-                                    &times;
+    const renderRouteList = () => {
+        if (loading) {
+            return (
+                <EmptyState titleText={_("Memuat data Caddy...")} headingLevel="h4" icon={Spinner} />
+            );
+        }
+
+        if (filteredRoutes.length === 0) {
+            return (
+                <EmptyState
+                    titleText={routes.length === 0 ? _("Belum ada reverse proxy") : _("Tidak ada hasil")}
+                    headingLevel="h4"
+                >
+                    <EmptyStateBody>
+                        {routes.length === 0
+                            ? _("Belum ada reverse proxy yang terkonfigurasi di Caddy.")
+                            : _("Tidak ditemukan proxy yang sesuai dengan pencarian.")}
+                    </EmptyStateBody>
+                    {routes.length === 0 && (
+                        <EmptyStateFooter>
+                            <EmptyStateActions>
+                                <Button variant="primary" icon={<PlusCircleIcon />} onClick={openAddModal}>
+                                    {_("Tambah proxy")}
                                 </Button>
-                            }
-                        >
-                            {a.message}
-                        </Alert>
+                            </EmptyStateActions>
+                        </EmptyStateFooter>
+                    )}
+                </EmptyState>
+            );
+        }
+
+        return (
+            <Table aria-label={_("Daftar reverse proxy")} variant="compact">
+                <Thead>
+                    <Tr>
+                        <Th>{_("Domain / Host")}</Th>
+                        <Th>{_("Target upstream")}</Th>
+                        <Th>{_("Fitur")}</Th>
+                        <Th screenReaderText={_("Aksi")} />
+                    </Tr>
+                </Thead>
+                <Tbody>
+                    {filteredRoutes.map(route => (
+                        <Tr key={route.id}>
+                            <Td dataLabel={_("Domain / Host")}>
+                                <div>{route.hosts.join(', ')}</div>
+                                <Content component="small">
+                                    {route.hasRealId ? `ID: ${route.id}` : `${_("Indeks")} #${route.routeIndex}`}
+                                </Content>
+                            </Td>
+                            <Td dataLabel={_("Target upstream")}>
+                                <Flex spaceItems={{ default: 'spaceItemsSm' }}>
+                                    {route.upstreams.map((u, i) => (
+                                        <FlexItem key={i}>
+                                            <Label variant="outline" isCompact>{u}</Label>
+                                        </FlexItem>
+                                    ))}
+                                </Flex>
+                            </Td>
+                            <Td dataLabel={_("Fitur")}>
+                                <Flex spaceItems={{ default: 'spaceItemsSm' }}>
+                                    {route.isHttps && (
+                                        <FlexItem><Label color="green" isCompact>HTTPS</Label></FlexItem>
+                                    )}
+                                    {route.hasHeaders && (
+                                        <FlexItem><Label color="blue" isCompact>{_("Header")}</Label></FlexItem>
+                                    )}
+                                </Flex>
+                            </Td>
+                            <Td isActionCell>
+                                <ActionsColumn
+                                    items={[
+                                        { title: _("Edit"), onClick: () => openEditModal(route) },
+                                        { isSeparator: true },
+                                        { title: _("Hapus"), onClick: () => setRouteToDelete(route) },
+                                    ]}
+                                />
+                            </Td>
+                        </Tr>
                     ))}
-                </AlertGroup>
-            </div>
+                </Tbody>
+            </Table>
+        );
+    };
 
-            {/* Page Header */}
-            <PageSection padding={{ default: 'padding' }} style={{ borderBottom: '1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-                    <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <ServerIcon style={{ fontSize: '1.5rem', color: 'var(--pf-v6-global--primary-color--100, #0066cc)' }} />
-                            <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 600 }}>Caddy Reverse Proxy</h1>
-                            {connected ? (
-                                <Label color="green" icon={<CheckCircleIcon />}>API Online</Label>
-                            ) : (
-                                <Label color="red" icon={<ExclamationCircleIcon />}>API Terputus</Label>
-                            )}
-                        </div>
-                        <p style={{ margin: '4px 0 0 0', color: 'var(--pf-v6-global--Color--200, #6a6e73)', fontSize: '0.9rem' }}>
-                            Kelola host reverse proxy, upstream backend, dan sertifikat TLS otomatis melalui Caddy Engine.
-                        </p>
-                    </div>
+    return (
+        <Page className="pf-m-no-sidebar">
+            {/* Notifikasi toast */}
+            <AlertGroup isToast isLiveRegion>
+                {alerts.map(a => (
+                    <Alert
+                        key={a.id}
+                        variant={a.variant}
+                        title={a.title}
+                        timeout={4000}
+                        onTimeout={() => removeAlert(a.id)}
+                        actionClose={<AlertActionCloseButton onClose={() => removeAlert(a.id)} />}
+                    >
+                        {a.message}
+                    </Alert>
+                ))}
+            </AlertGroup>
 
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                        <Button
-                            variant="secondary"
-                            icon={<SyncAltIcon />}
-                            onClick={() => { loadConfig(); addAlert(_("Data diperbarui"), "info"); }}
-                            isLoading={loading}
-                        >
-                            Segarkan
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            icon={<RedoIcon />}
-                            onClick={handleReloadCaddy}
-                        >
-                            Reload Caddy
-                        </Button>
-                        <Button
-                            variant="primary"
-                            icon={<PlusCircleIcon />}
-                            onClick={openAddModal}
-                        >
-                            Tambah Proxy
-                        </Button>
-                    </div>
-                </div>
+            {/* Header */}
+            <PageSection>
+                <Flex
+                    justifyContent={{ default: 'justifyContentSpaceBetween' }}
+                    alignItems={{ default: 'alignItemsCenter' }}
+                >
+                    <FlexItem>
+                        <Flex alignItems={{ default: 'alignItemsCenter' }}>
+                            <FlexItem>
+                                <Title headingLevel="h1">{_("Caddy Reverse Proxy")}</Title>
+                            </FlexItem>
+                            <FlexItem>
+                                {connected
+                                    ? <Label color="green" icon={<CheckCircleIcon />}>{_("API online")}</Label>
+                                    : <Label color="red" icon={<ExclamationCircleIcon />}>{_("API terputus")}</Label>}
+                            </FlexItem>
+                        </Flex>
+                        <Content component="p">
+                            {_("Kelola host reverse proxy, upstream backend, dan sertifikat TLS otomatis melalui Caddy.")}
+                        </Content>
+                    </FlexItem>
+                    <FlexItem>
+                        <Flex>
+                            <FlexItem>
+                                <Button
+                                    variant="secondary"
+                                    icon={<SyncAltIcon />}
+                                    onClick={loadConfig}
+                                    isLoading={loading}
+                                >
+                                    {_("Segarkan")}
+                                </Button>
+                            </FlexItem>
+                            <FlexItem>
+                                <Button variant="secondary" icon={<RedoIcon />} onClick={handleReloadCaddy}>
+                                    {_("Reload Caddy")}
+                                </Button>
+                            </FlexItem>
+                        </Flex>
+                    </FlexItem>
+                </Flex>
             </PageSection>
 
-            {/* Stats Dashboard */}
-            <PageSection padding={{ default: 'padding' }}>
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-                    gap: '16px',
-                    marginBottom: '20px'
-                }}>
-                    <Card isCompact>
-                        <CardHeader>
-                            <span style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200, #6a6e73)' }}>Total Reverse Proxies</span>
-                        </CardHeader>
-                        <CardBody>
-                            <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--pf-v6-global--Color--100, #151515)' }}>
-                                {stats.totalRoutes}
-                            </div>
-                        </CardBody>
-                    </Card>
-
-                    <Card isCompact>
-                        <CardHeader>
-                            <span style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200, #6a6e73)' }}>Target Upstreams</span>
-                        </CardHeader>
-                        <CardBody>
-                            <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--pf-v6-global--primary-color--100, #0066cc)' }}>
-                                {stats.totalUpstreams}
-                            </div>
-                        </CardBody>
-                    </Card>
-
-                    <Card isCompact>
-                        <CardHeader>
-                            <span style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200, #6a6e73)' }}>HTTPS Otomatis</span>
-                        </CardHeader>
-                        <CardBody>
-                            <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--pf-v6-global--success-color--100, #3e8635)' }}>
-                                {stats.httpsCount} Aktif
-                            </div>
-                        </CardBody>
-                    </Card>
-
-                    <Card isCompact>
-                        <CardHeader>
-                            <span style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200, #6a6e73)' }}>Status Admin API</span>
-                        </CardHeader>
-                        <CardBody>
-                            <div style={{
-                                fontSize: '1.75rem',
-                                fontWeight: 700,
-                                color: connected ? 'var(--pf-v6-global--success-color--100, #3e8635)' : 'var(--pf-v6-global--danger-color--100, #c9190b)'
-                            }}>
-                                {connected ? 'Online' : 'Offline'}
-                            </div>
-                        </CardBody>
-                    </Card>
-                </div>
-
-                {/* Main Content Tabs */}
+            {/* Tab */}
+            <PageSection type="tabs">
                 <Tabs
                     activeKey={activeTab}
                     onSelect={(_event, tabIndex) => setActiveTab(tabIndex)}
                     usePageInsets
-                    style={{ marginBottom: '16px' }}
+                    aria-label={_("Bagian plugin Caddy")}
                 >
-                    <Tab eventKey={0} title={<TabTitleText>Daftar Reverse Proxy</TabTitleText>} />
-                    <Tab eventKey={1} title={<TabTitleText>Konfigurasi JSON (Raw)</TabTitleText>} />
-                    <Tab eventKey={2} title={<TabTitleText>Caddyfile Preview</TabTitleText>} />
+                    <Tab eventKey={0} title={<TabTitleText>{_("Reverse proxy")}</TabTitleText>} aria-label={_("Reverse proxy")} />
+                    <Tab eventKey={1} title={<TabTitleText>{_("Konfigurasi JSON")}</TabTitleText>} aria-label={_("Konfigurasi JSON")} />
+                    <Tab eventKey={2} title={<TabTitleText>{_("Pratinjau Caddyfile")}</TabTitleText>} aria-label={_("Pratinjau Caddyfile")} />
                 </Tabs>
+            </PageSection>
 
-                {/* TAB 0: Reverse Proxy List */}
+            <PageSection>
+                {/* TAB 0: Daftar reverse proxy */}
                 {activeTab === 0 && (
                     <Card>
                         <CardBody>
-                            <Toolbar id="caddy-toolbar" style={{ padding: '0 0 16px 0' }}>
+                            <Toolbar id="caddy-toolbar">
                                 <ToolbarContent>
                                     <ToolbarItem>
-                                        <TextInput
-                                            type="search"
+                                        <SearchInput
                                             id="proxy-search"
-                                            placeholder="Cari domain atau port..."
+                                            placeholder={_("Cari domain, upstream, atau ID")}
                                             value={searchQuery}
-                                            onChange={(_e, val) => setSearchQuery(val)}
-                                            style={{ minWidth: '280px' }}
+                                            onChange={(_event, val) => setSearchQuery(val)}
+                                            onClear={() => setSearchQuery('')}
                                         />
                                     </ToolbarItem>
+                                    <ToolbarItem>
+                                        <Button variant="primary" icon={<PlusCircleIcon />} onClick={openAddModal}>
+                                            {_("Tambah proxy")}
+                                        </Button>
+                                    </ToolbarItem>
                                     <ToolbarItem align={{ default: 'alignEnd' }}>
-                                        <Badge isRead>{filteredRoutes.length} dari {routes.length} item</Badge>
+                                        {cockpit.format(_("$0 dari $1 proxy"), filteredRoutes.length, routes.length)}
                                     </ToolbarItem>
                                 </ToolbarContent>
                             </Toolbar>
-
-                            {loading ? (
-                                <div style={{ textAlign: 'center', padding: '40px' }}>
-                                    <Spinner size="lg" />
-                                    <p style={{ marginTop: '12px', color: 'var(--pf-v6-global--Color--200, #6a6e73)' }}>Memuat data Caddy...</p>
-                                </div>
-                            ) : filteredRoutes.length === 0 ? (
-                                <EmptyState>
-                                    <EmptyStateBody>
-                                        {routes.length === 0
-                                            ? "Belum ada Reverse Proxy yang terkonfigurasi di Caddy."
-                                            : "Tidak ditemukan proxy yang sesuai dengan pencarian."}
-                                    </EmptyStateBody>
-                                    <EmptyStateActions style={{ marginTop: '16px' }}>
-                                        <Button variant="primary" icon={<PlusCircleIcon />} onClick={openAddModal}>
-                                            Tambah Proxy Sekarang
-                                        </Button>
-                                    </EmptyStateActions>
-                                </EmptyState>
-                            ) : (
-                                <div style={{ overflowX: 'auto' }}>
-                                    <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ width: '100%' }}>
-                                        <thead>
-                                            <tr role="row">
-                                                <th role="columnheader" style={{ width: '38%' }}>Domain / Host</th>
-                                                <th role="columnheader" style={{ width: '32%' }}>Target Upstream</th>
-                                                <th role="columnheader" style={{ width: '15%' }}>Fitur</th>
-                                                <th role="columnheader" style={{ width: '15%', textAlign: 'right' }}>Aksi</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody role="rowgroup">
-                                            {filteredRoutes.map((route) => (
-                                                <tr key={route.id} role="row">
-                                                    <td role="cell" data-label="Domain / Host">
-                                                        <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>
-                                                            {route.hosts.join(', ')}
-                                                        </div>
-                                                        <div style={{ fontSize: '0.75rem', color: 'var(--pf-v6-global--Color--200, #6a6e73)', marginTop: '2px' }}>
-                                                            {route.hasRealId ? `ID: ${route.id}` : `Index #${route.routeIndex}`}
-                                                        </div>
-                                                    </td>
-                                                    <td role="cell" data-label="Target Upstream">
-                                                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                                                            {route.upstreams.map((u, i) => (
-                                                                <span
-                                                                    key={i}
-                                                                    style={{
-                                                                        background: 'var(--pf-v6-global--BackgroundColor--200, #f0f0f0)',
-                                                                        border: '1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2)',
-                                                                        borderRadius: '3px',
-                                                                        padding: '2px 8px',
-                                                                        fontFamily: 'monospace',
-                                                                        fontSize: '0.85rem'
-                                                                    }}
-                                                                >
-                                                                    {u}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    </td>
-                                                    <td role="cell" data-label="Fitur">
-                                                        <div style={{ display: 'flex', gap: '6px' }}>
-                                                            {route.isHttps && (
-                                                                <Label color="green" isCompact>SSL</Label>
-                                                            )}
-                                                            {route.hasHeaders && (
-                                                                <Label color="blue" isCompact>Headers</Label>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                    <td role="cell" data-label="Aksi" style={{ textAlign: 'right' }}>
-                                                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                                                            <Button
-                                                                variant="secondary"
-                                                                size="sm"
-                                                                icon={<EditIcon />}
-                                                                onClick={() => openEditModal(route)}
-                                                            >
-                                                                Edit
-                                                            </Button>
-                                                            <Button
-                                                                variant="danger"
-                                                                size="sm"
-                                                                icon={<TrashIcon />}
-                                                                onClick={() => handleDeleteRoute(route)}
-                                                            >
-                                                                Hapus
-                                                            </Button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
+                            {renderRouteList()}
                         </CardBody>
                     </Card>
                 )}
 
-                {/* TAB 1: Raw JSON Config */}
+                {/* TAB 1: Raw JSON */}
                 {activeTab === 1 && (
                     <Card>
-                        <CardHeader>
-                            <CardTitle>Editor Konfigurasi JSON Caddy</CardTitle>
-                        </CardHeader>
+                        <CardTitle>{_("Editor konfigurasi JSON Caddy")}</CardTitle>
                         <CardBody>
-                            <p style={{ color: 'var(--pf-v6-global--Color--200, #6a6e73)', marginBottom: '12px' }}>
-                                Anda dapat mengedit struktur JSON konfigurasi Caddy secara langsung di bawah ini. Pastikan sintaks JSON valid sebelum menerapkan.
-                            </p>
-                            <TextArea
-                                id="raw-json-editor"
-                                value={rawEditorText}
-                                onChange={(_e, val) => setRawEditorText(val)}
-                                rows={20}
-                                style={{
-                                    fontFamily: 'monospace',
-                                    fontSize: '0.85rem',
-                                    marginBottom: '16px'
-                                }}
-                            />
-                            <div style={{ display: 'flex', gap: '10px' }}>
-                                <Button
-                                    variant="primary"
-                                    onClick={handleSaveRawConfig}
-                                    isLoading={savingRaw}
-                                >
-                                    Terapkan Konfigurasi JSON
-                                </Button>
-                                <Button
-                                    variant="secondary"
-                                    icon={<DownloadIcon />}
-                                    onClick={handleDownloadBackup}
-                                >
-                                    Download Backup JSON
-                                </Button>
-                            </div>
+                            <Form>
+                                <FormGroup label={_("Konfigurasi JSON")} fieldId="raw-json-editor">
+                                    <TextArea
+                                        id="raw-json-editor"
+                                        value={rawEditorText}
+                                        onChange={(_event, val) => setRawEditorText(val)}
+                                        rows={20}
+                                        resizeOrientation="vertical"
+                                        spellCheck={false}
+                                        style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}
+                                    />
+                                    <FormHelperText>
+                                        <HelperText>
+                                            <HelperTextItem>
+                                                {_("Pastikan sintaks JSON valid sebelum menerapkan.")}
+                                            </HelperTextItem>
+                                        </HelperText>
+                                    </FormHelperText>
+                                </FormGroup>
+                                <Flex>
+                                    <FlexItem>
+                                        <Button variant="primary" onClick={handleSaveRawConfig} isLoading={savingRaw}>
+                                            {_("Terapkan konfigurasi")}
+                                        </Button>
+                                    </FlexItem>
+                                    <FlexItem>
+                                        <Button variant="secondary" icon={<DownloadIcon />} onClick={handleDownloadBackup}>
+                                            {_("Unduh backup JSON")}
+                                        </Button>
+                                    </FlexItem>
+                                </Flex>
+                            </Form>
                         </CardBody>
                     </Card>
                 )}
 
-                {/* TAB 2: Caddyfile Preview */}
+                {/* TAB 2: Pratinjau Caddyfile */}
                 {activeTab === 2 && (
                     <Card>
-                        <CardHeader>
-                            <CardTitle>Representasi Format Caddyfile</CardTitle>
-                        </CardHeader>
+                        <CardTitle>{_("Representasi Caddyfile")}</CardTitle>
                         <CardBody>
-                            <p style={{ color: 'var(--pf-v6-global--Color--200, #6a6e73)', marginBottom: '12px' }}>
-                                Ini adalah representasi bagaimana rute Caddy di atas ditulis jika menggunakan format file Caddyfile biasa:
-                            </p>
+                            <Content component="p">
+                                {_("Beginilah rute Caddy di atas jika ditulis dalam format Caddyfile biasa:")}
+                            </Content>
                             <CodeBlock>
                                 <CodeBlockCode>{caddyfilePreview}</CodeBlockCode>
                             </CodeBlock>
@@ -744,86 +669,110 @@ export const Application = () => {
                 )}
             </PageSection>
 
-            {/* Modal Tambah / Edit Route */}
+            {/* Modal tambah / edit */}
             <Modal
+                variant="medium"
                 isOpen={isModalOpen}
                 onClose={closeModal}
-                style={{ maxWidth: '600px', width: '100%' }}
                 aria-labelledby="modal-route-title"
             >
                 <ModalHeader
-                    title={editingRouteId ? `Edit Reverse Proxy` : `Tambah Reverse Proxy Baru`}
+                    title={editingRouteId ? _("Edit reverse proxy") : _("Tambah reverse proxy")}
                     labelId="modal-route-title"
                 />
                 <ModalBody>
-                    <Form onSubmit={handleSaveRoute}>
-                        <FormGroup
-                            label="Domain / Hostname"
-                            isRequired
-                            fieldId="route-domains"
-                        >
+                    <Form id="route-form" onSubmit={handleSaveRoute} isHorizontal>
+                        <FormGroup label={_("Domain / Hostname")} isRequired fieldId="route-domains">
                             <TextInput
                                 id="route-domains"
                                 isRequired
-                                placeholder="contoh: app.domain.com, api.domain.com"
+                                placeholder="app.domain.com, api.domain.com"
                                 value={formDomains}
-                                onChange={(_e, val) => setFormDomains(val)}
+                                onChange={(_event, val) => setFormDomains(val)}
                             />
-                            <small style={{ color: 'var(--pf-v6-global--Color--200, #6a6e73)' }}>
-                                Pisahkan dengan koma jika menggunakan beberapa domain untuk upstream yang sama.
-                            </small>
+                            <FormHelperText>
+                                <HelperText>
+                                    <HelperTextItem>
+                                        {_("Pisahkan dengan koma untuk beberapa domain pada upstream yang sama.")}
+                                    </HelperTextItem>
+                                </HelperText>
+                            </FormHelperText>
                         </FormGroup>
 
-                        <FormGroup
-                            label="Target Upstream (IP & Port)"
-                            isRequired
-                            fieldId="route-upstreams"
-                        >
+                        <FormGroup label={_("Target upstream")} isRequired fieldId="route-upstreams">
                             <TextInput
                                 id="route-upstreams"
                                 isRequired
-                                placeholder="contoh: 127.0.0.1:3000 atau 192.168.1.50:8080"
+                                placeholder="127.0.0.1:3000, 192.168.1.50:8080"
                                 value={formUpstreams}
-                                onChange={(_e, val) => setFormUpstreams(val)}
+                                onChange={(_event, val) => setFormUpstreams(val)}
                             />
-                            <small style={{ color: 'var(--pf-v6-global--Color--200, #6a6e73)' }}>
-                                Masukkan host:port upstream. Pisahkan dengan koma untuk load balancing.
-                            </small>
+                            <FormHelperText>
+                                <HelperText>
+                                    <HelperTextItem>
+                                        {_("Format host:port. Pisahkan dengan koma untuk load balancing.")}
+                                    </HelperTextItem>
+                                </HelperText>
+                            </FormHelperText>
                         </FormGroup>
 
-                        <FormGroup
-                            label="Route ID (Opsional)"
-                            fieldId="route-id"
-                        >
+                        <FormGroup label={_("Route ID")} fieldId="route-id">
                             <TextInput
                                 id="route-id"
                                 placeholder="proxy_1"
                                 value={formId}
-                                readOnly={!!editingRouteId}
-                                onChange={(_e, val) => setFormId(val)}
+                                {...(editingRouteId ? { readOnlyVariant: 'default' } : {})}
+                                onChange={(_event, val) => setFormId(val)}
                             />
                         </FormGroup>
 
-                        <FormGroup fieldId="route-headers">
+                        <FormGroup role="group" fieldId="route-headers" label={_("Opsi")}>
                             <Checkbox
                                 id="route-headers"
-                                label="Teruskan Client Headers (Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto)"
+                                label={_("Teruskan header klien")}
+                                description="Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto"
                                 isChecked={formHeaders}
-                                onChange={(_e, val) => setFormHeaders(val)}
+                                onChange={(_event, val) => setFormHeaders(val)}
                             />
                         </FormGroup>
-
-                        <ActionGroup style={{ marginTop: '20px' }}>
-                            <Button variant="primary" type="submit" isLoading={formSubmitting}>
-                                {editingRouteId ? 'Simpan Perubahan' : 'Tambah Proxy'}
-                            </Button>
-                            <Button variant="link" onClick={closeModal}>
-                                Batal
-                            </Button>
-                        </ActionGroup>
                     </Form>
                 </ModalBody>
-                <ModalFooter />
+                <ModalFooter>
+                    <Button variant="primary" type="submit" form="route-form" isLoading={formSubmitting} isDisabled={formSubmitting}>
+                        {editingRouteId ? _("Simpan perubahan") : _("Tambah proxy")}
+                    </Button>
+                    <Button variant="link" onClick={closeModal}>
+                        {_("Batal")}
+                    </Button>
+                </ModalFooter>
+            </Modal>
+
+            {/* Modal konfirmasi hapus */}
+            <Modal
+                variant="small"
+                isOpen={routeToDelete !== null}
+                onClose={() => setRouteToDelete(null)}
+                aria-labelledby="modal-delete-title"
+            >
+                <ModalHeader
+                    title={_("Hapus reverse proxy?")}
+                    titleIconVariant="warning"
+                    labelId="modal-delete-title"
+                />
+                <ModalBody>
+                    {routeToDelete && cockpit.format(
+                        _("Proxy untuk $0 akan dihapus dari konfigurasi Caddy."),
+                        routeToDelete.hosts.join(', ')
+                    )}
+                </ModalBody>
+                <ModalFooter>
+                    <Button variant="danger" onClick={handleConfirmDelete} isLoading={deleting} isDisabled={deleting}>
+                        {_("Hapus")}
+                    </Button>
+                    <Button variant="link" onClick={() => setRouteToDelete(null)}>
+                        {_("Batal")}
+                    </Button>
+                </ModalFooter>
             </Modal>
         </Page>
     );
