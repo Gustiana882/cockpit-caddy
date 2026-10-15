@@ -27,7 +27,6 @@ import { Toolbar, ToolbarContent, ToolbarItem } from '@patternfly/react-core/dis
 import { Spinner } from '@patternfly/react-core/dist/esm/components/Spinner/index.js';
 import { CodeBlock, CodeBlockCode } from '@patternfly/react-core/dist/esm/components/CodeBlock/index.js';
 import { Content } from '@patternfly/react-core/dist/esm/components/Content/index.js';
-import { Title } from '@patternfly/react-core/dist/esm/components/Title/index.js';
 import { Flex, FlexItem } from '@patternfly/react-core/dist/esm/layouts/Flex/index.js';
 import { Table, Thead, Tbody, Tr, Th, Td, ActionsColumn } from '@patternfly/react-table/dist/esm/components/Table/index.js';
 
@@ -524,55 +523,12 @@ export const Application = () => {
                 ))}
             </AlertGroup>
 
-            {/* Header */}
-            <PageSection>
-                <Flex
-                    justifyContent={{ default: 'justifyContentSpaceBetween' }}
-                    alignItems={{ default: 'alignItemsCenter' }}
-                >
-                    <FlexItem>
-                        <Flex alignItems={{ default: 'alignItemsCenter' }}>
-                            <FlexItem>
-                                <Title headingLevel="h1">{_("Caddy Reverse Proxy")}</Title>
-                            </FlexItem>
-                            <FlexItem>
-                                {connected
-                                    ? <Label color="green" icon={<CheckCircleIcon />}>{_("API online")}</Label>
-                                    : <Label color="red" icon={<ExclamationCircleIcon />}>{_("API terputus")}</Label>}
-                            </FlexItem>
-                        </Flex>
-                        <Content component="p">
-                            {_("Kelola host reverse proxy, upstream backend, dan sertifikat TLS otomatis melalui Caddy.")}
-                        </Content>
-                    </FlexItem>
-                    <FlexItem>
-                        <Flex>
-                            <FlexItem>
-                                <Button
-                                    variant="secondary"
-                                    icon={<SyncAltIcon />}
-                                    onClick={loadConfig}
-                                    isLoading={loading}
-                                >
-                                    {_("Segarkan")}
-                                </Button>
-                            </FlexItem>
-                            <FlexItem>
-                                <Button variant="secondary" icon={<RedoIcon />} onClick={handleReloadCaddy}>
-                                    {_("Reload Caddy")}
-                                </Button>
-                            </FlexItem>
-                        </Flex>
-                    </FlexItem>
-                </Flex>
-            </PageSection>
-
-            {/* Tab */}
-            <PageSection type="tabs">
+            {/* Tab (pola sama dengan halaman Services Cockpit) */}
+            <PageSection type="tabs" hasBodyWrapper={false}>
                 <Tabs
                     activeKey={activeTab}
                     onSelect={(_event, tabIndex) => setActiveTab(tabIndex)}
-                    usePageInsets
+                    hasNoBorderBottom
                     aria-label={_("Bagian plugin Caddy")}
                 >
                     <Tab eventKey={0} title={<TabTitleText>{_("Reverse proxy")}</TabTitleText>} aria-label={_("Reverse proxy")} />
@@ -581,7 +537,7 @@ export const Application = () => {
                 </Tabs>
             </PageSection>
 
-            <PageSection>
+            <PageSection hasBodyWrapper={false}>
                 {/* TAB 0: Daftar reverse proxy */}
                 {activeTab === 0 && (
                     <Card>
@@ -602,7 +558,22 @@ export const Application = () => {
                                             {_("Tambah proxy")}
                                         </Button>
                                     </ToolbarItem>
+                                    <ToolbarItem>
+                                        <Button variant="secondary" icon={<SyncAltIcon />} onClick={loadConfig} isLoading={loading}>
+                                            {_("Segarkan")}
+                                        </Button>
+                                    </ToolbarItem>
+                                    <ToolbarItem>
+                                        <Button variant="secondary" icon={<RedoIcon />} onClick={handleReloadCaddy}>
+                                            {_("Reload Caddy")}
+                                        </Button>
+                                    </ToolbarItem>
                                     <ToolbarItem align={{ default: 'alignEnd' }}>
+                                        {connected
+                                            ? <Label color="green" icon={<CheckCircleIcon />}>{_("API online")}</Label>
+                                            : <Label color="red" icon={<ExclamationCircleIcon />}>{_("API terputus")}</Label>}
+                                    </ToolbarItem>
+                                    <ToolbarItem>
                                         {cockpit.format(_("$0 dari $1 proxy"), filteredRoutes.length, routes.length)}
                                     </ToolbarItem>
                                 </ToolbarContent>
@@ -721,7 +692,7 @@ export const Application = () => {
                                 id="route-id"
                                 placeholder="proxy_1"
                                 value={formId}
-                                {...(editingRouteId ? { readOnlyVariant: 'default' } : {})}
+                                {...(editingRouteId ? { readOnlyVariant: 'default' as const } : {})}
                                 onChange={(_event, val) => setFormId(val)}
                             />
                         </FormGroup>
