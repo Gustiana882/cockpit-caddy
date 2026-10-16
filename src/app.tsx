@@ -556,14 +556,9 @@ export const Application = () => {
             }
 
             closeModal();
-            reloadPage();
+            await loadConfig();
         } catch (err: any) {
             console.error('Error saving route:', err);
-            if (isDisconnectError(err)) {
-                closeModal();
-                reloadPage();
-                return;
-            }
             setModalError(err.message || _("Gagal menyimpan konfigurasi"));
         } finally {
             setFormSubmitting(false);
@@ -601,14 +596,9 @@ export const Application = () => {
             await deleteRouteInternal(routeToDelete.id);
             addAlert(_("Terhapus"), "success", `Rute ${domainStr} berhasil dihapus.`);
             setRouteToDelete(null);
-            reloadPage();
+            await loadConfig();
         } catch (err: any) {
             console.error('Failed to delete route:', err);
-            if (isDisconnectError(err)) {
-                setRouteToDelete(null);
-                reloadPage();
-                return;
-            }
             addAlert(_("Gagal menghapus"), "danger", err.message);
         } finally {
             setDeleting(false);
@@ -627,7 +617,7 @@ export const Application = () => {
                 await caddyRequest('/load', 'POST', rawConfig);
                 addAlert(_("Sukses"), "success", _("Konfigurasi Caddy dimuat ulang via Admin API"));
             }
-            reloadPage();
+            await loadConfig();
         } catch (err: any) {
             addAlert(_("Gagal reload Caddy"), "danger", err.message);
         }
@@ -640,7 +630,7 @@ export const Application = () => {
             const parsed = JSON.parse(rawEditorText);
             await caddyRequest('/load', 'POST', parsed);
             addAlert(_("Konfigurasi diterapkan"), "success", _("Konfigurasi JSON Caddy berhasil diperbarui"));
-            reloadPage();
+            await loadConfig();
         } catch (err: any) {
             addAlert(_("Gagal menerapkan konfigurasi"), "danger", err.message);
         } finally {
