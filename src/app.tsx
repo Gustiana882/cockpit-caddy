@@ -38,6 +38,7 @@ import RedoIcon from '@patternfly/react-icons/dist/esm/icons/redo-icon.js';
 import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon.js';
 import CheckCircleIcon from '@patternfly/react-icons/dist/esm/icons/check-circle-icon.js';
 import ExclamationCircleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-circle-icon.js';
+import { v4 as uuidv4 } from 'uuid';
 
 const _ = cockpit.gettext;
 
@@ -271,7 +272,7 @@ export const Application = () => {
         setFormUpstreams('');
         setFormUpstreamScheme('http');
         setFormInsecureSkipVerify(true);
-        setFormId(`proxy_${Date.now()}`);
+        setFormId(uuidv4());
         setFormHeaders(true);
         setFormWebsocket(true);
         setFormCompression(true);
@@ -287,7 +288,7 @@ export const Application = () => {
         setFormUpstreams(route.upstreams.join(', '));
         setFormUpstreamScheme(route.isUpstreamHttps ? 'https' : 'http');
         setFormInsecureSkipVerify(route.insecureSkipVerify);
-        setFormId(route.hasRealId ? route.id : `proxy_${Date.now()}`);
+        setFormId(route.hasRealId ? route.id : uuidv4());
         setFormHeaders(route.hasHeaders);
         setFormWebsocket(route.hasWebsocket);
         setFormCompression(route.hasCompression);
@@ -347,7 +348,7 @@ export const Application = () => {
             return;
         }
 
-        const routeId = formId.trim() || `proxy_${Date.now()}`;
+        const routeId = formId.trim() || uuidv4();
         const proxyHandler: any = {
             handler: "reverse_proxy",
             upstreams: upstreamsList
@@ -907,7 +908,7 @@ export const Application = () => {
                             <FormGroup label={_("Route ID")} fieldId="route-id">
                                 <TextInput
                                     id="route-id"
-                                    placeholder="proxy_1"
+                                    placeholder="550e8400-e29b-41d4-a716-446655440000"
                                     value={formId}
                                     {...(editingRouteId ? { readOnlyVariant: 'default' as const } : {})}
                                     onChange={(_event, val) => setFormId(val)}
