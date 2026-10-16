@@ -45,11 +45,16 @@ const _ = cockpit.gettext;
 // Card penuh tanpa sudut membulat
 const flatCard: React.CSSProperties = { borderRadius: 0 };
 
+const HSTS_VALUE = "max-age=31536000; includeSubDomains; preload";
+
+type RouteKind = 'proxy' | 'static';
+
 interface CaddyRoute {
     id: string;
     hasRealId: boolean;
     serverKey: string;
     routeIndex: number;
+    kind: RouteKind;
     hosts: string[];
     upstreams: string[];
     rawRoute: any;
@@ -60,6 +65,10 @@ interface CaddyRoute {
     hasHeaders: boolean;
     hasCompression: boolean;
     hasHsts: boolean;
+    // khusus situs statis
+    root: string;
+    hasSpa: boolean;
+    hasBrowse: boolean;
 }
 
 interface NotificationAlert {
@@ -121,6 +130,17 @@ async function caddyRequest(path: string, method: string = 'GET', data: any = nu
     }
 }
 
+// Cek path di server lewat cockpit (test -d / test -f). Di luar Cockpit selalu dianggap ada.
+async function pathTest(flag: '-d' | '-f', path: string): Promise<boolean> {
+    if (typeof cockpit === 'undefined' || typeof cockpit.spawn !== 'function') return true;
+    try {
+        await cockpit.spawn(['test', flag, path], { superuser: 'try' });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export const Application = () => {
     // State
     const [connected, setConnected] = useState<boolean>(false);
@@ -135,10 +155,14 @@ export const Application = () => {
     // Modal state (tambah / edit)
     const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
     const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
+    const [formKind, setFormKind] = useState<RouteKind>('proxy');
     const [formDomains, setFormDomains] = useState<string>('');
     const [formUpstreams, setFormUpstreams] = useState<string>('');
     const [formUpstreamScheme, setFormUpstreamScheme] = useState<'http' | 'https'>('http');
     const [formInsecureSkipVerify, setFormInsecureSkipVerify] = useState<boolean>(true);
+    const [formRoot, setFormRoot] = useState<string>('');
+    const [formSpa, setFormSpa] = useState<boolean>(false);
+    const [formBrowse, setFormBrowse] = useState<boolean>(false);
     const [formId, setFormId] = useState<string>('');
     const [formHeaders, setFormHeaders] = useState<boolean>(true);
     const [formWebsocket, setFormWebsocket] = useState<boolean>(true);
@@ -192,8 +216,11 @@ export const Application = () => {
                         srv.routes.forEach((route: any, index: number) => {
                             const handleList = route.handle || [];
                             const proxyHandler = handleList.find((h: any) => h.handler === 'reverse_proxy');
+                            const fileHandler = handleList.find((h: any) => h.handler === 'file_server');
 
-                            if (proxyHandler) {
+                            if (proxyHandler || fileHandler) {
+                                const kind: RouteKind = proxyHandler ? 'proxy' : 'static';
+
                                 const hosts: string[] = [];
                                 if (route.match && Array.isArray(route.match)) {
                                     route.match.forEach((m: any) => {
@@ -204,23 +231,31 @@ export const Application = () => {
                                 }
 
                                 const upstreams: string[] = [];
-                                if (proxyHandler.upstreams && Array.isArray(proxyHandler.upstreams)) {
+                                if (proxyHandler?.upstreams && Array.isArray(proxyHandler.upstreams)) {
                                     upstreams.push(...proxyHandler.upstreams.map((u: any) => u.dial));
                                 }
 
-                                const hasHeaders = !!(proxyHandler.headers && proxyHandler.headers.request);
+                                const hasHeaders = !!(proxyHandler?.headers && proxyHandler.headers.request);
                                 const isHttps = hosts.some(h => !h.includes(':') && h !== '*' && !h.endsWith('.localhost'));
-                                const isUpstreamHttps = !!(proxyHandler.transport && proxyHandler.transport.tls);
-                                const insecureSkipVerify = !!(proxyHandler.transport?.tls?.insecure_skip_verify);
-                                const hasWebsocket = proxyHandler.flush_interval === -1;
+                                const isUpstreamHttps = !!(proxyHandler?.transport && proxyHandler.transport.tls);
+                                const insecureSkipVerify = !!(proxyHandler?.transport?.tls?.insecure_skip_verify);
+                                const hasWebsocket = proxyHandler?.flush_interval === -1;
                                 const hasCompression = handleList.some((h: any) => h.handler === 'encode');
-                                const hasHsts = !!(proxyHandler.headers?.response?.set?.['Strict-Transport-Security']);
+                                const hasHsts = !!(
+                                    proxyHandler?.headers?.response?.set?.['Strict-Transport-Security'] ||
+                                    handleList.some((h: any) => h.handler === 'headers' && h.response?.set?.['Strict-Transport-Security'])
+                                );
+                                const hasSpa = handleList.some((h: any) =>
+                                    h.handler === 'subroute' &&
+                                    h.routes?.some((r: any) => r.match?.some((m: any) => m.file?.try_files))
+                                );
 
                                 parsedRoutes.push({
                                     id: route['@id'] || `srv_${sKey}_route_${index}`,
                                     hasRealId: !!route['@id'],
                                     serverKey: sKey,
                                     routeIndex: index,
+                                    kind,
                                     hosts: hosts.length > 0 ? hosts : [_("* (Semua host)")],
                                     upstreams,
                                     rawRoute: route,
@@ -230,7 +265,10 @@ export const Application = () => {
                                     hasWebsocket,
                                     hasHeaders,
                                     hasCompression,
-                                    hasHsts
+                                    hasHsts,
+                                    root: fileHandler?.root || '',
+                                    hasSpa,
+                                    hasBrowse: !!fileHandler?.browse
                                 });
                             }
                         });
@@ -259,6 +297,7 @@ export const Application = () => {
         return routes.filter(r =>
             r.hosts.some(h => h.toLowerCase().includes(query)) ||
             r.upstreams.some(u => u.toLowerCase().includes(query)) ||
+            r.root.toLowerCase().includes(query) ||
             r.id.toLowerCase().includes(query)
         );
     }, [routes, searchQuery]);
@@ -268,10 +307,14 @@ export const Application = () => {
         setModalError(null);
         setAdvancedOpen(false);
         setEditingRouteId(null);
+        setFormKind('proxy');
         setFormDomains('');
         setFormUpstreams('');
         setFormUpstreamScheme('http');
         setFormInsecureSkipVerify(true);
+        setFormRoot('');
+        setFormSpa(false);
+        setFormBrowse(false);
         setFormId(uuidv4());
         setFormHeaders(true);
         setFormWebsocket(true);
@@ -284,10 +327,14 @@ export const Application = () => {
         setModalError(null);
         setAdvancedOpen(false);
         setEditingRouteId(route.id);
+        setFormKind(route.kind);
         setFormDomains(route.hosts.join(', '));
         setFormUpstreams(route.upstreams.join(', '));
         setFormUpstreamScheme(route.isUpstreamHttps ? 'https' : 'http');
         setFormInsecureSkipVerify(route.insecureSkipVerify);
+        setFormRoot(route.root);
+        setFormSpa(route.hasSpa);
+        setFormBrowse(route.hasBrowse);
         setFormId(route.hasRealId ? route.id : uuidv4());
         setFormHeaders(route.hasHeaders);
         setFormWebsocket(route.hasWebsocket);
@@ -333,21 +380,13 @@ export const Application = () => {
         }
     };
 
-    // Save Route
-    const handleSaveRoute = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const domains = formDomains.split(',').map(d => d.trim()).filter(Boolean);
-        const upstreamsList = formUpstreams.split(',').map(u => {
-            const clean = u.trim().replace(/^https?:\/\//i, '');
-            return { dial: clean };
-        }).filter(u => u.dial);
-
-        if (domains.length === 0 || upstreamsList.length === 0) {
-            setModalError(_("Harap isi Domain dan Target Upstream"));
-            return;
+    // Bangun daftar handler untuk rute reverse proxy
+    const buildProxyHandlers = (upstreamsList: { dial: string }[]): any[] => {
+        const handlers: any[] = [];
+        if (formCompression) {
+            handlers.push({ handler: "encode", encodings: { gzip: {}, zstd: {} } });
         }
 
-        const routeId = formId.trim() || uuidv4();
         const proxyHandler: any = {
             handler: "reverse_proxy",
             upstreams: upstreamsList
@@ -375,31 +414,103 @@ export const Application = () => {
                 }
             };
         }
-
         if (formHsts) {
-            headersObj.response = {
-                set: {
-                    "Strict-Transport-Security": ["max-age=31536000; includeSubDomains; preload"]
-                }
-            };
+            headersObj.response = { set: { "Strict-Transport-Security": [HSTS_VALUE] } };
         }
-
         if (headersObj.request || headersObj.response) {
             proxyHandler.headers = headersObj;
         }
 
+        handlers.push(proxyHandler);
+        return handlers;
+    };
+
+    // Bangun daftar handler untuk rute situs statis (folder)
+    const buildStaticHandlers = (rootPath: string): any[] => {
         const handlers: any[] = [];
         if (formCompression) {
+            handlers.push({ handler: "encode", encodings: { gzip: {}, zstd: {} } });
+        }
+        if (formHsts) {
             handlers.push({
-                handler: "encode",
-                encodings: {
-                    gzip: {},
-                    zstd: {}
-                }
+                handler: "headers",
+                response: { set: { "Strict-Transport-Security": [HSTS_VALUE] } }
             });
         }
-        handlers.push(proxyHandler);
+        if (formSpa) {
+            // Setara dengan: try_files {path} /index.html
+            handlers.push({
+                handler: "subroute",
+                routes: [{
+                    match: [{
+                        file: {
+                            root: rootPath,
+                            try_files: ["{http.request.uri.path}", "/index.html"]
+                        }
+                    }],
+                    handle: [{ handler: "rewrite", uri: "{http.matchers.file.relative}" }]
+                }]
+            });
+        }
+        const fileServer: any = { handler: "file_server", root: rootPath };
+        if (formBrowse) {
+            fileServer.browse = {};
+        }
+        handlers.push(fileServer);
+        return handlers;
+    };
 
+    // Save Route
+    const handleSaveRoute = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const domains = formDomains.split(',').map(d => d.trim()).filter(Boolean);
+
+        let handlers: any[] = [];
+
+        if (formKind === 'proxy') {
+            const upstreamsList = formUpstreams.split(',').map(u => {
+                const clean = u.trim().replace(/^https?:\/\//i, '');
+                return { dial: clean };
+            }).filter(u => u.dial);
+
+            if (domains.length === 0 || upstreamsList.length === 0) {
+                setModalError(_("Harap isi Domain dan Target Upstream"));
+                return;
+            }
+            handlers = buildProxyHandlers(upstreamsList);
+        } else {
+            const rootPath = formRoot.trim().replace(/\/+$/, '') || '/';
+
+            if (domains.length === 0 || !formRoot.trim()) {
+                setModalError(_("Harap isi Domain dan Folder root"));
+                return;
+            }
+            if (!rootPath.startsWith('/')) {
+                setModalError(_("Folder root harus berupa path absolut, misalnya /var/www/situs"));
+                return;
+            }
+
+            setFormSubmitting(true);
+            const dirOk = await pathTest('-d', rootPath);
+            if (!dirOk) {
+                setFormSubmitting(false);
+                setModalError(cockpit.format(_("Folder $0 tidak ditemukan di server."), rootPath));
+                return;
+            }
+            if (!formBrowse) {
+                const indexOk = await pathTest('-f', `${rootPath}/index.html`);
+                if (!indexOk) {
+                    addAlert(
+                        _("index.html tidak ditemukan"),
+                        "warning",
+                        cockpit.format(_("Tidak ada $0/index.html. Pengunjung akan melihat 404."), rootPath)
+                    );
+                }
+            }
+            handlers = buildStaticHandlers(rootPath);
+        }
+
+        const routeId = formId.trim() || uuidv4();
         const newRoute: any = {
             "@id": routeId,
             match: [{ host: domains }],
@@ -421,10 +532,10 @@ export const Application = () => {
                     await deleteRouteInternal(editingRouteId);
                     await addRouteToCaddy(newRoute);
                 }
-                addAlert(_("Berhasil"), "success", `Reverse proxy ${domains[0]} berhasil diperbarui.`);
+                addAlert(_("Berhasil"), "success", `Rute ${domains[0]} berhasil diperbarui.`);
             } else {
                 await addRouteToCaddy(newRoute);
-                addAlert(_("Berhasil"), "success", `Reverse proxy ${domains[0]} berhasil ditambahkan.`);
+                addAlert(_("Berhasil"), "success", `Rute ${domains[0]} berhasil ditambahkan.`);
             }
 
             closeModal();
@@ -466,7 +577,7 @@ export const Application = () => {
         setDeleting(true);
         try {
             await deleteRouteInternal(routeToDelete.id);
-            addAlert(_("Terhapus"), "success", `Proxy ${domainStr} berhasil dihapus.`);
+            addAlert(_("Terhapus"), "success", `Rute ${domainStr} berhasil dihapus.`);
             setRouteToDelete(null);
             await loadConfig();
         } catch (err: any) {
@@ -525,16 +636,33 @@ export const Application = () => {
     // Generate Caddyfile preview
     const caddyfilePreview = useMemo(() => {
         if (routes.length === 0) {
-            return '# Belum ada proxy terdaftar di Caddy';
+            return '# Belum ada rute terdaftar di Caddy';
         }
-        let out = '# Representasi Caddyfile dari reverse_proxy yang aktif:\n\n';
+        let out = '# Representasi Caddyfile dari rute yang aktif:\n\n';
         routes.forEach(r => {
             out += `${r.hosts.join(', ')} {\n`;
+
+            if (r.kind === 'static') {
+                out += `    root * ${r.root}\n`;
+                if (r.hasCompression) {
+                    out += `    encode gzip zstd\n`;
+                }
+                if (r.hasHsts) {
+                    out += `    header Strict-Transport-Security "${HSTS_VALUE}"\n`;
+                }
+                if (r.hasSpa) {
+                    out += `    try_files {path} /index.html\n`;
+                }
+                out += r.hasBrowse ? `    file_server browse\n` : `    file_server\n`;
+                out += '}\n\n';
+                return;
+            }
+
             if (r.hasCompression) {
                 out += `    encode gzip zstd\n`;
             }
             if (r.hasHsts) {
-                out += `    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"\n`;
+                out += `    header Strict-Transport-Security "${HSTS_VALUE}"\n`;
             }
             if (r.isUpstreamHttps || r.hasWebsocket) {
                 out += `    reverse_proxy ${r.upstreams.join(' ')} {\n`;
@@ -561,14 +689,23 @@ export const Application = () => {
 
     // Ringkasan fitur sebagai teks biasa (tanpa label berwarna)
     const featureSummary = (route: CaddyRoute) => {
-        const list = [
-            route.isHttps && _("Auto-TLS"),
-            route.hasWebsocket && "WebSocket",
-            route.hasCompression && _("Kompresi"),
-            route.hasHsts && "HSTS",
-            route.hasHeaders && _("Header klien"),
-        ].filter(Boolean);
-        return list.length > 0 ? list.join(', ') : '-';
+        const list = route.kind === 'static'
+            ? [
+                route.isHttps && _("Auto-TLS"),
+                route.hasSpa && "SPA",
+                route.hasBrowse && _("Daftar folder"),
+                route.hasCompression && _("Kompresi"),
+                route.hasHsts && "HSTS",
+            ]
+            : [
+                route.isHttps && _("Auto-TLS"),
+                route.hasWebsocket && "WebSocket",
+                route.hasCompression && _("Kompresi"),
+                route.hasHsts && "HSTS",
+                route.hasHeaders && _("Header klien"),
+            ];
+        const filtered = list.filter(Boolean);
+        return filtered.length > 0 ? filtered.join(', ') : '-';
     };
 
     const renderRouteList = () => {
@@ -581,19 +718,19 @@ export const Application = () => {
         if (filteredRoutes.length === 0) {
             return (
                 <EmptyState
-                    titleText={routes.length === 0 ? _("Belum ada reverse proxy") : _("Tidak ada hasil")}
+                    titleText={routes.length === 0 ? _("Belum ada rute") : _("Tidak ada hasil")}
                     headingLevel="h4"
                 >
                     <EmptyStateBody>
                         {routes.length === 0
-                            ? _("Belum ada reverse proxy yang terkonfigurasi di Caddy.")
-                            : _("Tidak ditemukan proxy yang sesuai dengan pencarian.")}
+                            ? _("Belum ada reverse proxy atau situs statis yang terkonfigurasi di Caddy.")
+                            : _("Tidak ditemukan rute yang sesuai dengan pencarian.")}
                     </EmptyStateBody>
                     {routes.length === 0 && (
                         <EmptyStateFooter>
                             <EmptyStateActions>
                                 <Button variant="primary" icon={<PlusCircleIcon />} onClick={openAddModal}>
-                                    {_("Tambah proxy")}
+                                    {_("Tambah rute")}
                                 </Button>
                             </EmptyStateActions>
                         </EmptyStateFooter>
@@ -603,11 +740,12 @@ export const Application = () => {
         }
 
         return (
-            <Table aria-label={_("Daftar reverse proxy")} variant="compact">
+            <Table aria-label={_("Daftar rute")} variant="compact">
                 <Thead>
                     <Tr>
                         <Th>{_("Domain")}</Th>
-                        <Th>{_("Upstream")}</Th>
+                        <Th>{_("Tipe")}</Th>
+                        <Th>{_("Tujuan")}</Th>
                         <Th>{_("Fitur")}</Th>
                         <Th screenReaderText={_("Aksi")} />
                     </Tr>
@@ -621,10 +759,15 @@ export const Application = () => {
                                     {route.hasRealId ? route.id : `${_("Indeks")} #${route.routeIndex}`}
                                 </Content>
                             </Td>
-                            <Td dataLabel={_("Upstream")}>
-                                {route.upstreams.map((u, i) => (
-                                    <div key={i}>{route.isUpstreamHttps ? `https://${u}` : u}</div>
-                                ))}
+                            <Td dataLabel={_("Tipe")}>
+                                {route.kind === 'static' ? _("Situs statis") : _("Reverse proxy")}
+                            </Td>
+                            <Td dataLabel={_("Tujuan")}>
+                                {route.kind === 'static'
+                                    ? <div>{route.root || '-'}</div>
+                                    : route.upstreams.map((u, i) => (
+                                        <div key={i}>{route.isUpstreamHttps ? `https://${u}` : u}</div>
+                                    ))}
                             </Td>
                             <Td dataLabel={_("Fitur")}>
                                 {featureSummary(route)}
@@ -672,14 +815,14 @@ export const Application = () => {
                     usePageInsets
                     aria-label={_("Bagian plugin Caddy")}
                 >
-                    <Tab eventKey={0} title={<TabTitleText>{_("Reverse proxy")}</TabTitleText>} aria-label={_("Reverse proxy")} />
+                    <Tab eventKey={0} title={<TabTitleText>{_("Rute")}</TabTitleText>} aria-label={_("Rute")} />
                     <Tab eventKey={1} title={<TabTitleText>{_("Konfigurasi JSON")}</TabTitleText>} aria-label={_("Konfigurasi JSON")} />
                     <Tab eventKey={2} title={<TabTitleText>{_("Pratinjau Caddyfile")}</TabTitleText>} aria-label={_("Pratinjau Caddyfile")} />
                 </Tabs>
             </PageSection>
 
             <PageSection hasBodyWrapper={false} padding={{ default: 'noPadding' }}>
-                {/* TAB 0: Daftar reverse proxy */}
+                {/* TAB 0: Daftar rute */}
                 {activeTab === 0 && (
                     <Card style={flatCard}>
                         <CardBody>
@@ -688,7 +831,7 @@ export const Application = () => {
                                     <ToolbarItem>
                                         <SearchInput
                                             id="proxy-search"
-                                            placeholder={_("Cari domain atau upstream")}
+                                            placeholder={_("Cari domain, upstream, atau folder")}
                                             value={searchQuery}
                                             onChange={(_event, val) => setSearchQuery(val)}
                                             onClear={() => setSearchQuery('')}
@@ -696,7 +839,7 @@ export const Application = () => {
                                     </ToolbarItem>
                                     <ToolbarItem>
                                         <Button variant="primary" icon={<PlusCircleIcon />} onClick={openAddModal}>
-                                            {_("Tambah proxy")}
+                                            {_("Tambah rute")}
                                         </Button>
                                     </ToolbarItem>
                                     <ToolbarItem align={{ default: 'alignEnd' }}>
@@ -790,7 +933,7 @@ export const Application = () => {
                 aria-labelledby="modal-route-title"
             >
                 <ModalHeader
-                    title={editingRouteId ? _("Edit reverse proxy") : _("Tambah reverse proxy")}
+                    title={editingRouteId ? _("Edit rute") : _("Tambah rute")}
                     labelId="modal-route-title"
                 />
                 <ModalBody>
@@ -801,11 +944,28 @@ export const Application = () => {
                             </Alert>
                         )}
 
+                        <FormGroup role="radiogroup" isInline fieldId="route-kind" label={_("Tipe")}>
+                            <Radio
+                                id="kind-proxy"
+                                name="route-kind"
+                                label={_("Reverse proxy")}
+                                isChecked={formKind === 'proxy'}
+                                onChange={() => setFormKind('proxy')}
+                            />
+                            <Radio
+                                id="kind-static"
+                                name="route-kind"
+                                label={_("Situs statis (folder)")}
+                                isChecked={formKind === 'static'}
+                                onChange={() => setFormKind('static')}
+                            />
+                        </FormGroup>
+
                         <FormGroup label={_("Domain")} isRequired fieldId="route-domains">
                             <TextInput
                                 id="route-domains"
                                 isRequired
-                                placeholder="app.domain.com, api.domain.com"
+                                placeholder="app.domain.com, www.domain.com"
                                 value={formDomains}
                                 onChange={(_event, val) => setFormDomains(val)}
                             />
@@ -816,70 +976,121 @@ export const Application = () => {
                             </FormHelperText>
                         </FormGroup>
 
-                        <FormGroup label={_("Upstream")} isRequired fieldId="route-upstreams">
-                            <TextInput
-                                id="route-upstreams"
-                                isRequired
-                                placeholder="127.0.0.1:3000, 192.168.1.50:8080"
-                                value={formUpstreams}
-                                onChange={(_event, val) => {
-                                    setFormUpstreams(val);
-                                    if (val.toLowerCase().includes('https://')) {
-                                        setFormUpstreamScheme('https');
-                                    }
-                                }}
-                            />
-                            <FormHelperText>
-                                <HelperText>
-                                    <HelperTextItem>{_("Format host:port. Pisahkan dengan koma untuk load balancing.")}</HelperTextItem>
-                                </HelperText>
-                            </FormHelperText>
-                        </FormGroup>
+                        {formKind === 'proxy' ? (
+                            <>
+                                <FormGroup label={_("Upstream")} isRequired fieldId="route-upstreams">
+                                    <TextInput
+                                        id="route-upstreams"
+                                        isRequired
+                                        placeholder="127.0.0.1:3000, 192.168.1.50:8080"
+                                        value={formUpstreams}
+                                        onChange={(_event, val) => {
+                                            setFormUpstreams(val);
+                                            if (val.toLowerCase().includes('https://')) {
+                                                setFormUpstreamScheme('https');
+                                            }
+                                        }}
+                                    />
+                                    <FormHelperText>
+                                        <HelperText>
+                                            <HelperTextItem>{_("Format host:port. Pisahkan dengan koma untuk load balancing.")}</HelperTextItem>
+                                        </HelperText>
+                                    </FormHelperText>
+                                </FormGroup>
 
-                        <FormGroup role="radiogroup" isInline fieldId="route-scheme" label={_("Protokol backend")}>
-                            <Radio
-                                id="scheme-http"
-                                name="upstream-scheme"
-                                label="HTTP"
-                                isChecked={formUpstreamScheme === 'http'}
-                                onChange={() => setFormUpstreamScheme('http')}
-                            />
-                            <Radio
-                                id="scheme-https"
-                                name="upstream-scheme"
-                                label="HTTPS"
-                                isChecked={formUpstreamScheme === 'https'}
-                                onChange={() => setFormUpstreamScheme('https')}
-                            />
-                            <FormHelperText>
-                                <HelperText>
-                                    <HelperTextItem>
-                                        {_("Pilih HTTPS jika backend memakai TLS, misalnya Cockpit :9090 atau Proxmox :8006.")}
-                                    </HelperTextItem>
-                                </HelperText>
-                            </FormHelperText>
-                        </FormGroup>
+                                <FormGroup role="radiogroup" isInline fieldId="route-scheme" label={_("Protokol backend")}>
+                                    <Radio
+                                        id="scheme-http"
+                                        name="upstream-scheme"
+                                        label="HTTP"
+                                        isChecked={formUpstreamScheme === 'http'}
+                                        onChange={() => setFormUpstreamScheme('http')}
+                                    />
+                                    <Radio
+                                        id="scheme-https"
+                                        name="upstream-scheme"
+                                        label="HTTPS"
+                                        isChecked={formUpstreamScheme === 'https'}
+                                        onChange={() => setFormUpstreamScheme('https')}
+                                    />
+                                    <FormHelperText>
+                                        <HelperText>
+                                            <HelperTextItem>
+                                                {_("Pilih HTTPS jika backend memakai TLS, misalnya Cockpit :9090 atau Proxmox :8006.")}
+                                            </HelperTextItem>
+                                        </HelperText>
+                                    </FormHelperText>
+                                </FormGroup>
+                            </>
+                        ) : (
+                            <FormGroup label={_("Folder root")} isRequired fieldId="route-root">
+                                <TextInput
+                                    id="route-root"
+                                    isRequired
+                                    placeholder="/var/www/situs"
+                                    value={formRoot}
+                                    onChange={(_event, val) => setFormRoot(val)}
+                                />
+                                <FormHelperText>
+                                    <HelperText>
+                                        <HelperTextItem>
+                                            {_("Folder di server yang berisi index.html, CSS, dan JS. User caddy harus bisa membacanya.")}
+                                        </HelperTextItem>
+                                    </HelperText>
+                                </FormHelperText>
+                            </FormGroup>
+                        )}
 
                         <FormGroup role="group" isStack fieldId="route-options" label={_("Opsi")}>
-                            <Checkbox
-                                id="route-websocket"
-                                label="WebSocket"
-                                description={_("Untuk koneksi dua arah, misalnya terminal web atau Socket.io.")}
-                                isChecked={formWebsocket}
-                                onChange={(_event, val) => setFormWebsocket(val)}
-                            />
+                            {formKind === 'proxy' ? (
+                                <>
+                                    <Checkbox
+                                        id="route-websocket"
+                                        label="WebSocket"
+                                        description={_("Untuk koneksi dua arah, misalnya terminal web atau Socket.io.")}
+                                        isChecked={formWebsocket}
+                                        onChange={(_event, val) => setFormWebsocket(val)}
+                                    />
+                                    <Checkbox
+                                        id="route-headers"
+                                        label={_("Teruskan header klien")}
+                                        description="Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto"
+                                        isChecked={formHeaders}
+                                        onChange={(_event, val) => setFormHeaders(val)}
+                                    />
+                                    {formUpstreamScheme === 'https' && (
+                                        <Checkbox
+                                            id="route-insecure-tls"
+                                            label={_("Abaikan verifikasi sertifikat backend")}
+                                            description={_("Diperlukan untuk sertifikat self-signed.")}
+                                            isChecked={formInsecureSkipVerify}
+                                            onChange={(_event, val) => setFormInsecureSkipVerify(val)}
+                                        />
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    <Checkbox
+                                        id="route-spa"
+                                        label={_("Mode SPA")}
+                                        description={_("Path yang tidak ada diarahkan ke index.html (React, Vue, dan sejenisnya).")}
+                                        isChecked={formSpa}
+                                        onChange={(_event, val) => setFormSpa(val)}
+                                    />
+                                    <Checkbox
+                                        id="route-browse"
+                                        label={_("Tampilkan daftar isi folder")}
+                                        description={_("Jika tidak ada index.html, isi folder ditampilkan ke pengunjung.")}
+                                        isChecked={formBrowse}
+                                        onChange={(_event, val) => setFormBrowse(val)}
+                                    />
+                                </>
+                            )}
                             <Checkbox
                                 id="route-compression"
                                 label={_("Kompresi respons (gzip, zstd)")}
                                 isChecked={formCompression}
                                 onChange={(_event, val) => setFormCompression(val)}
-                            />
-                            <Checkbox
-                                id="route-headers"
-                                label={_("Teruskan header klien")}
-                                description="Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto"
-                                isChecked={formHeaders}
-                                onChange={(_event, val) => setFormHeaders(val)}
                             />
                             <Checkbox
                                 id="route-hsts"
@@ -888,15 +1099,6 @@ export const Application = () => {
                                 isChecked={formHsts}
                                 onChange={(_event, val) => setFormHsts(val)}
                             />
-                            {formUpstreamScheme === 'https' && (
-                                <Checkbox
-                                    id="route-insecure-tls"
-                                    label={_("Abaikan verifikasi sertifikat backend")}
-                                    description={_("Diperlukan untuk sertifikat self-signed.")}
-                                    isChecked={formInsecureSkipVerify}
-                                    onChange={(_event, val) => setFormInsecureSkipVerify(val)}
-                                />
-                            )}
                         </FormGroup>
 
                         <ExpandableSection
@@ -923,7 +1125,7 @@ export const Application = () => {
                 </ModalBody>
                 <ModalFooter>
                     <Button variant="primary" type="submit" form="route-form" isLoading={formSubmitting} isDisabled={formSubmitting}>
-                        {editingRouteId ? _("Simpan perubahan") : _("Tambah proxy")}
+                        {editingRouteId ? _("Simpan perubahan") : _("Tambah rute")}
                     </Button>
                     <Button variant="link" onClick={closeModal}>
                         {_("Batal")}
@@ -939,13 +1141,13 @@ export const Application = () => {
                 aria-labelledby="modal-delete-title"
             >
                 <ModalHeader
-                    title={_("Hapus reverse proxy?")}
+                    title={_("Hapus rute?")}
                     titleIconVariant="warning"
                     labelId="modal-delete-title"
                 />
                 <ModalBody>
                     {routeToDelete && cockpit.format(
-                        _("Proxy untuk $0 akan dihapus dari konfigurasi Caddy."),
+                        _("Rute untuk $0 akan dihapus dari konfigurasi Caddy. File di folder tidak ikut dihapus."),
                         routeToDelete.hosts.join(', ')
                     )}
                 </ModalBody>
