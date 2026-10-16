@@ -15,13 +15,13 @@ import { Label } from '@patternfly/react-core/dist/esm/components/Label/index.js
 import { Alert, AlertGroup, AlertActionCloseButton } from '@patternfly/react-core/dist/esm/components/Alert/index.js';
 import { Tabs, Tab, TabTitleText } from '@patternfly/react-core/dist/esm/components/Tabs/index.js';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '@patternfly/react-core/dist/esm/components/Modal/index.js';
-import { Form, FormGroup } from '@patternfly/react-core/dist/esm/components/Form/index.js';
-import { FormHelperText } from '@patternfly/react-core/dist/esm/components/Form/index.js';
+import { Form, FormGroup, FormHelperText } from '@patternfly/react-core/dist/esm/components/Form/index.js';
 import { HelperText, HelperTextItem } from '@patternfly/react-core/dist/esm/components/HelperText/index.js';
 import { TextInput } from '@patternfly/react-core/dist/esm/components/TextInput/index.js';
 import { TextArea } from '@patternfly/react-core/dist/esm/components/TextArea/index.js';
 import { Checkbox } from '@patternfly/react-core/dist/esm/components/Checkbox/index.js';
 import { Radio } from '@patternfly/react-core/dist/esm/components/Radio/index.js';
+import { ExpandableSection } from '@patternfly/react-core/dist/esm/components/ExpandableSection/index.js';
 import { SearchInput } from '@patternfly/react-core/dist/esm/components/SearchInput/index.js';
 import { EmptyState, EmptyStateBody, EmptyStateFooter, EmptyStateActions } from '@patternfly/react-core/dist/esm/components/EmptyState/index.js';
 import { Toolbar, ToolbarContent, ToolbarItem } from '@patternfly/react-core/dist/esm/components/Toolbar/index.js';
@@ -40,6 +40,9 @@ import CheckCircleIcon from '@patternfly/react-icons/dist/esm/icons/check-circle
 import ExclamationCircleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-circle-icon.js';
 
 const _ = cockpit.gettext;
+
+// Card penuh tanpa sudut membulat
+const flatCard: React.CSSProperties = { borderRadius: 0 };
 
 interface CaddyRoute {
     id: string;
@@ -130,7 +133,6 @@ export const Application = () => {
 
     // Modal state (tambah / edit)
     const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-    const [modalTab, setModalTab] = useState<number | string>(0);
     const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
     const [formDomains, setFormDomains] = useState<string>('');
     const [formUpstreams, setFormUpstreams] = useState<string>('');
@@ -143,6 +145,7 @@ export const Application = () => {
     const [formHsts, setFormHsts] = useState<boolean>(false);
     const [formSubmitting, setFormSubmitting] = useState<boolean>(false);
     const [modalError, setModalError] = useState<string | null>(null);
+    const [advancedOpen, setAdvancedOpen] = useState<boolean>(false);
 
     // Modal konfirmasi hapus
     const [routeToDelete, setRouteToDelete] = useState<CaddyRoute | null>(null);
@@ -261,8 +264,8 @@ export const Application = () => {
 
     // Modal controls
     const openAddModal = () => {
-        setModalTab(0);
         setModalError(null);
+        setAdvancedOpen(false);
         setEditingRouteId(null);
         setFormDomains('');
         setFormUpstreams('');
@@ -277,8 +280,8 @@ export const Application = () => {
     };
 
     const openEditModal = (route: CaddyRoute) => {
-        setModalTab(0);
         setModalError(null);
+        setAdvancedOpen(false);
         setEditingRouteId(route.id);
         setFormDomains(route.hosts.join(', '));
         setFormUpstreams(route.upstreams.join(', '));
@@ -319,7 +322,7 @@ export const Application = () => {
             if (Array.isArray(existingRoutes)) {
                 const dummyIdx = existingRoutes.findIndex(
                     (r: any) => (!r.match || r.match.length === 0) &&
-                                r.handle?.some((h: any) => h.handler === 'file_server' || h.handler === 'vars')
+                        r.handle?.some((h: any) => h.handler === 'file_server' || h.handler === 'vars')
                 );
                 if (dummyIdx !== -1) {
                     await caddyRequest(`${sPath}/routes/${dummyIdx}`, 'DELETE');
@@ -341,7 +344,6 @@ export const Application = () => {
 
         if (domains.length === 0 || upstreamsList.length === 0) {
             setModalError(_("Harap isi Domain dan Target Upstream"));
-            addAlert(_("Input tidak lengkap"), "danger", _("Harap isi Domain dan Target Upstream"));
             return;
         }
 
@@ -406,6 +408,7 @@ export const Application = () => {
         };
 
         setFormSubmitting(true);
+        setModalError(null);
         try {
             const sPath = `/config/apps/http/servers/${serverName}`;
             await ensureServerConfig(sPath);
@@ -429,7 +432,6 @@ export const Application = () => {
         } catch (err: any) {
             console.error('Error saving route:', err);
             setModalError(err.message || _("Gagal menyimpan konfigurasi"));
-            addAlert(_("Gagal menyimpan"), "danger", err.message);
         } finally {
             setFormSubmitting(false);
         }
@@ -557,6 +559,18 @@ export const Application = () => {
         return out;
     }, [routes]);
 
+    // Ringkasan fitur sebagai teks biasa (tanpa label berwarna)
+    const featureSummary = (route: CaddyRoute) => {
+        const list = [
+            route.isHttps && _("Auto-TLS"),
+            route.hasWebsocket && "WebSocket",
+            route.hasCompression && _("Kompresi"),
+            route.hasHsts && "HSTS",
+            route.hasHeaders && _("Header klien"),
+        ].filter(Boolean);
+        return list.length > 0 ? list.join(', ') : '-';
+    };
+
     const renderRouteList = () => {
         if (loading) {
             return (
@@ -589,11 +603,11 @@ export const Application = () => {
         }
 
         return (
-            <Table aria-label={_("Daftar reverse proxy")} variant="compact" className="caddy-table">
+            <Table aria-label={_("Daftar reverse proxy")} variant="compact">
                 <Thead>
                     <Tr>
-                        <Th>{_("Domain / Host")}</Th>
-                        <Th>{_("Target upstream")}</Th>
+                        <Th>{_("Domain")}</Th>
+                        <Th>{_("Upstream")}</Th>
                         <Th>{_("Fitur")}</Th>
                         <Th screenReaderText={_("Aksi")} />
                     </Tr>
@@ -601,46 +615,19 @@ export const Application = () => {
                 <Tbody>
                     {filteredRoutes.map(route => (
                         <Tr key={route.id}>
-                            <Td dataLabel={_("Domain / Host")}>
-                                <div className="caddy-route-name">{route.hosts.join(', ')}</div>
-                                <div className="caddy-route-id">
-                                    {route.hasRealId ? `ID: ${route.id}` : `${_("Indeks")} #${route.routeIndex}`}
-                                </div>
+                            <Td dataLabel={_("Domain")}>
+                                <div>{route.hosts.join(', ')}</div>
+                                <Content component="small">
+                                    {route.hasRealId ? route.id : `${_("Indeks")} #${route.routeIndex}`}
+                                </Content>
                             </Td>
-                            <Td dataLabel={_("Target upstream")}>
-                                <Flex spaceItems={{ default: 'spaceItemsXs' }} flexWrap={{ default: 'wrap' }}>
-                                    {route.upstreams.map((u, i) => (
-                                        <FlexItem key={i}>
-                                            <Label variant="outline" isCompact>
-                                                {route.isUpstreamHttps ? `https://${u}` : u}
-                                            </Label>
-                                        </FlexItem>
-                                    ))}
-                                </Flex>
+                            <Td dataLabel={_("Upstream")}>
+                                {route.upstreams.map((u, i) => (
+                                    <div key={i}>{route.isUpstreamHttps ? `https://${u}` : u}</div>
+                                ))}
                             </Td>
                             <Td dataLabel={_("Fitur")}>
-                                <Flex spaceItems={{ default: 'spaceItemsSm' }} flexWrap={{ default: 'wrap' }}>
-                                    {route.isHttps && (
-                                        <FlexItem><Label color="green" isCompact>Auto-TLS</Label></FlexItem>
-                                    )}
-                                    {route.isUpstreamHttps && (
-                                        <FlexItem>
-                                            <Label color="purple" isCompact>Upstream: HTTPS</Label>
-                                        </FlexItem>
-                                    )}
-                                    {route.hasWebsocket && (
-                                        <FlexItem><Label color="teal" isCompact>WebSocket</Label></FlexItem>
-                                    )}
-                                    {route.hasCompression && (
-                                        <FlexItem><Label color="orange" isCompact>Gzip/Zstd</Label></FlexItem>
-                                    )}
-                                    {route.hasHsts && (
-                                        <FlexItem><Label color="yellow" isCompact>HSTS</Label></FlexItem>
-                                    )}
-                                    {route.hasHeaders && (
-                                        <FlexItem><Label color="blue" isCompact>{_("Header")}</Label></FlexItem>
-                                    )}
-                                </Flex>
+                                {featureSummary(route)}
                             </Td>
                             <Td isActionCell>
                                 <ActionsColumn
@@ -677,11 +664,12 @@ export const Application = () => {
             </AlertGroup>
 
             {/* Tab (pola sama dengan halaman Services Cockpit) */}
-            <PageSection type="tabs" hasBodyWrapper={false}>
+            <PageSection type="tabs" hasBodyWrapper={false} padding={{ default: 'noPadding' }}>
                 <Tabs
                     activeKey={activeTab}
                     onSelect={(_event, tabIndex) => setActiveTab(tabIndex)}
                     hasNoBorderBottom
+                    usePageInsets
                     aria-label={_("Bagian plugin Caddy")}
                 >
                     <Tab eventKey={0} title={<TabTitleText>{_("Reverse proxy")}</TabTitleText>} aria-label={_("Reverse proxy")} />
@@ -690,17 +678,17 @@ export const Application = () => {
                 </Tabs>
             </PageSection>
 
-            <PageSection hasBodyWrapper={false}>
+            <PageSection hasBodyWrapper={false} padding={{ default: 'noPadding' }}>
                 {/* TAB 0: Daftar reverse proxy */}
                 {activeTab === 0 && (
-                    <Card>
+                    <Card style={flatCard}>
                         <CardBody>
                             <Toolbar id="caddy-toolbar">
                                 <ToolbarContent>
                                     <ToolbarItem>
                                         <SearchInput
                                             id="proxy-search"
-                                            placeholder={_("Cari domain, upstream, atau ID")}
+                                            placeholder={_("Cari domain atau upstream")}
                                             value={searchQuery}
                                             onChange={(_event, val) => setSearchQuery(val)}
                                             onClear={() => setSearchQuery('')}
@@ -711,23 +699,24 @@ export const Application = () => {
                                             {_("Tambah proxy")}
                                         </Button>
                                     </ToolbarItem>
-                                    <ToolbarItem>
-                                        <Button variant="secondary" icon={<SyncAltIcon />} onClick={loadConfig} isLoading={loading}>
-                                            {_("Segarkan")}
-                                        </Button>
-                                    </ToolbarItem>
-                                    <ToolbarItem>
+                                    <ToolbarItem align={{ default: 'alignEnd' }}>
                                         <Button variant="secondary" icon={<RedoIcon />} onClick={handleReloadCaddy}>
                                             {_("Reload Caddy")}
                                         </Button>
                                     </ToolbarItem>
-                                    <ToolbarItem align={{ default: 'alignEnd' }}>
+                                    <ToolbarItem>
+                                        <Button
+                                            variant="plain"
+                                            aria-label={_("Segarkan")}
+                                            icon={<SyncAltIcon />}
+                                            onClick={loadConfig}
+                                            isDisabled={loading}
+                                        />
+                                    </ToolbarItem>
+                                    <ToolbarItem>
                                         {connected
                                             ? <Label color="green" icon={<CheckCircleIcon />}>{_("API online")}</Label>
                                             : <Label color="red" icon={<ExclamationCircleIcon />}>{_("API terputus")}</Label>}
-                                    </ToolbarItem>
-                                    <ToolbarItem>
-                                        {cockpit.format(_("$0 dari $1 proxy"), filteredRoutes.length, routes.length)}
                                     </ToolbarItem>
                                 </ToolbarContent>
                             </Toolbar>
@@ -738,7 +727,7 @@ export const Application = () => {
 
                 {/* TAB 1: Raw JSON */}
                 {activeTab === 1 && (
-                    <Card>
+                    <Card style={flatCard}>
                         <CardTitle>{_("Editor konfigurasi JSON Caddy")}</CardTitle>
                         <CardBody>
                             <Form>
@@ -779,7 +768,7 @@ export const Application = () => {
 
                 {/* TAB 2: Pratinjau Caddyfile */}
                 {activeTab === 2 && (
-                    <Card>
+                    <Card style={flatCard}>
                         <CardTitle>{_("Representasi Caddyfile")}</CardTitle>
                         <CardBody>
                             <Content component="p">
@@ -793,7 +782,7 @@ export const Application = () => {
                 )}
             </PageSection>
 
-            {/* Modal tambah / edit */}
+            {/* Modal tambah / edit: satu form, tanpa tab */}
             <Modal
                 variant="medium"
                 isOpen={isModalOpen}
@@ -805,179 +794,131 @@ export const Application = () => {
                     labelId="modal-route-title"
                 />
                 <ModalBody>
-                    {modalError && (
-                        <Alert
-                            variant="danger"
-                            isInline
-                            title={_("Gagal menyimpan")}
-                            style={{ marginBottom: '16px' }}
-                        >
-                            {modalError}
-                        </Alert>
-                    )}
                     <Form id="route-form" onSubmit={handleSaveRoute}>
-                        <Tabs
-                            activeKey={modalTab}
-                            onSelect={(_event, key) => setModalTab(key)}
-                            isBox
-                            aria-label={_("Tab konfigurasi proxy")}
+                        {modalError && (
+                            <Alert variant="danger" isInline title={_("Gagal menyimpan")}>
+                                {modalError}
+                            </Alert>
+                        )}
+
+                        <FormGroup label={_("Domain")} isRequired fieldId="route-domains">
+                            <TextInput
+                                id="route-domains"
+                                isRequired
+                                placeholder="app.domain.com, api.domain.com"
+                                value={formDomains}
+                                onChange={(_event, val) => setFormDomains(val)}
+                            />
+                            <FormHelperText>
+                                <HelperText>
+                                    <HelperTextItem>{_("Pisahkan dengan koma untuk beberapa domain.")}</HelperTextItem>
+                                </HelperText>
+                            </FormHelperText>
+                        </FormGroup>
+
+                        <FormGroup label={_("Upstream")} isRequired fieldId="route-upstreams">
+                            <TextInput
+                                id="route-upstreams"
+                                isRequired
+                                placeholder="127.0.0.1:3000, 192.168.1.50:8080"
+                                value={formUpstreams}
+                                onChange={(_event, val) => {
+                                    setFormUpstreams(val);
+                                    if (val.toLowerCase().includes('https://')) {
+                                        setFormUpstreamScheme('https');
+                                    }
+                                }}
+                            />
+                            <FormHelperText>
+                                <HelperText>
+                                    <HelperTextItem>{_("Format host:port. Pisahkan dengan koma untuk load balancing.")}</HelperTextItem>
+                                </HelperText>
+                            </FormHelperText>
+                        </FormGroup>
+
+                        <FormGroup role="radiogroup" isInline fieldId="route-scheme" label={_("Protokol backend")}>
+                            <Radio
+                                id="scheme-http"
+                                name="upstream-scheme"
+                                label="HTTP"
+                                isChecked={formUpstreamScheme === 'http'}
+                                onChange={() => setFormUpstreamScheme('http')}
+                            />
+                            <Radio
+                                id="scheme-https"
+                                name="upstream-scheme"
+                                label="HTTPS"
+                                isChecked={formUpstreamScheme === 'https'}
+                                onChange={() => setFormUpstreamScheme('https')}
+                            />
+                            <FormHelperText>
+                                <HelperText>
+                                    <HelperTextItem>
+                                        {_("Pilih HTTPS jika backend memakai TLS, misalnya Cockpit :9090 atau Proxmox :8006.")}
+                                    </HelperTextItem>
+                                </HelperText>
+                            </FormHelperText>
+                        </FormGroup>
+
+                        <FormGroup role="group" isStack fieldId="route-options" label={_("Opsi")}>
+                            <Checkbox
+                                id="route-websocket"
+                                label="WebSocket"
+                                description={_("Untuk koneksi dua arah, misalnya terminal web atau Socket.io.")}
+                                isChecked={formWebsocket}
+                                onChange={(_event, val) => setFormWebsocket(val)}
+                            />
+                            <Checkbox
+                                id="route-compression"
+                                label={_("Kompresi respons (gzip, zstd)")}
+                                isChecked={formCompression}
+                                onChange={(_event, val) => setFormCompression(val)}
+                            />
+                            <Checkbox
+                                id="route-headers"
+                                label={_("Teruskan header klien")}
+                                description="Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto"
+                                isChecked={formHeaders}
+                                onChange={(_event, val) => setFormHeaders(val)}
+                            />
+                            <Checkbox
+                                id="route-hsts"
+                                label="HSTS"
+                                description={_("Browser akan selalu memakai HTTPS untuk domain ini.")}
+                                isChecked={formHsts}
+                                onChange={(_event, val) => setFormHsts(val)}
+                            />
+                            {formUpstreamScheme === 'https' && (
+                                <Checkbox
+                                    id="route-insecure-tls"
+                                    label={_("Abaikan verifikasi sertifikat backend")}
+                                    description={_("Diperlukan untuk sertifikat self-signed.")}
+                                    isChecked={formInsecureSkipVerify}
+                                    onChange={(_event, val) => setFormInsecureSkipVerify(val)}
+                                />
+                            )}
+                        </FormGroup>
+
+                        <ExpandableSection
+                            toggleText={_("Lanjutan")}
+                            isExpanded={advancedOpen}
+                            onToggle={(_event, expanded) => setAdvancedOpen(expanded)}
                         >
-                            {/* TAB 0: Konfigurasi Utama */}
-                            <Tab eventKey={0} title={<TabTitleText>{_("Utama")}</TabTitleText>}>
-                                <div className="modal-tab-content">
-                                    <FormGroup label={_("Domain / Hostname")} isRequired fieldId="route-domains">
-                                        <TextInput
-                                            id="route-domains"
-                                            isRequired
-                                            placeholder="app.domain.com, api.domain.com"
-                                            value={formDomains}
-                                            onChange={(_event, val) => setFormDomains(val)}
-                                        />
-                                        <FormHelperText>
-                                            <HelperText>
-                                                <HelperTextItem>
-                                                    {_("Domain publik yang mengarah ke server ini. Pisahkan koma untuk multiple domain.")}
-                                                </HelperTextItem>
-                                            </HelperText>
-                                        </FormHelperText>
-                                    </FormGroup>
-
-                                    <FormGroup label={_("Target Upstream (IP:Port)")} isRequired fieldId="route-upstreams">
-                                        <TextInput
-                                            id="route-upstreams"
-                                            isRequired
-                                            placeholder="127.0.0.1:3000, 192.168.1.50:8080"
-                                            value={formUpstreams}
-                                            onChange={(_event, val) => {
-                                                setFormUpstreams(val);
-                                                if (val.toLowerCase().includes('https://')) {
-                                                    setFormUpstreamScheme('https');
-                                                }
-                                            }}
-                                        />
-                                        <FormHelperText>
-                                            <HelperText>
-                                                <HelperTextItem>
-                                                    {_("IP/Host dan port aplikasi backend. Pisahkan koma untuk load balancing.")}
-                                                </HelperTextItem>
-                                            </HelperText>
-                                        </FormHelperText>
-                                    </FormGroup>
-
-                                    <FormGroup role="radiogroup" fieldId="route-scheme" label={_("Protokol / Skema Backend")}>
-                                        <Flex spaceItems={{ default: 'spaceItemsLg' }}>
-                                            <FlexItem>
-                                                <Radio
-                                                    id="scheme-http"
-                                                    name="upstream-scheme"
-                                                    label={_("HTTP (Standar untuk Docker, Node.js, Python, PHP, dll)")}
-                                                    isChecked={formUpstreamScheme === 'http'}
-                                                    onChange={() => setFormUpstreamScheme('http')}
-                                                />
-                                            </FlexItem>
-                                            <FlexItem>
-                                                <Radio
-                                                    id="scheme-https"
-                                                    name="upstream-scheme"
-                                                    label={_("HTTPS (Untuk Cockpit :9090, Proxmox :8006, dll)")}
-                                                    isChecked={formUpstreamScheme === 'https'}
-                                                    onChange={() => setFormUpstreamScheme('https')}
-                                                />
-                                            </FlexItem>
-                                        </Flex>
-                                    </FormGroup>
-
-                                    <FormGroup label={_("Route ID (Opsional)")} fieldId="route-id">
-                                        <TextInput
-                                            id="route-id"
-                                            placeholder="proxy_1"
-                                            value={formId}
-                                            {...(editingRouteId ? { readOnlyVariant: 'default' as const } : {})}
-                                            onChange={(_event, val) => setFormId(val)}
-                                        />
-                                        <FormHelperText>
-                                            <HelperText>
-                                                <HelperTextItem>
-                                                    {_("Pengenal unik internal di Caddy untuk rute ini.")}
-                                                </HelperTextItem>
-                                            </HelperText>
-                                        </FormHelperText>
-                                    </FormGroup>
-                                </div>
-                            </Tab>
-
-                            {/* TAB 1: Fitur & Performa */}
-                            <Tab eventKey={1} title={<TabTitleText>{_("Fitur & Performa")}</TabTitleText>}>
-                                <div className="modal-tab-content">
-                                    <FormGroup role="group" fieldId="feature-websocket" label={_("Koneksi Real-Time")}>
-                                        <Checkbox
-                                            id="route-websocket"
-                                            label={_("Aktifkan WebSocket & Streaming")}
-                                            description={_("Mengaktifkan immediate buffer flush (flush_interval: -1) untuk koneksi dua arah WebSocket (Cockpit web console, Socket.io, Chat, SSH terminal web).")}
-                                            isChecked={formWebsocket}
-                                            onChange={(_event, val) => setFormWebsocket(val)}
-                                        />
-                                    </FormGroup>
-
-                                    <FormGroup role="group" fieldId="feature-compression" label={_("Akselerasi Kecepatan")}>
-                                        <Checkbox
-                                            id="route-compression"
-                                            label={_("Kompresi Respons (Gzip & Zstandard)")}
-                                            description={_("Otomatis mengompresi payload teks/HTML/JSON dari backend untuk menghemat bandwidth dan mempercepat load website.")}
-                                            isChecked={formCompression}
-                                            onChange={(_event, val) => setFormCompression(val)}
-                                        />
-                                    </FormGroup>
-
-                                    <FormGroup role="group" fieldId="feature-headers" label={_("Forwarding Header")}>
-                                        <Checkbox
-                                            id="route-headers"
-                                            label={_("Teruskan Header Klien Asli")}
-                                            description="Menyertakan header Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto agar backend mengetahui IP asli dan protokol pengunjung."
-                                            isChecked={formHeaders}
-                                            onChange={(_event, val) => setFormHeaders(val)}
-                                        />
-                                    </FormGroup>
-                                </div>
-                            </Tab>
-
-                            {/* TAB 2: Keamanan & Lanjutan */}
-                            <Tab eventKey={2} title={<TabTitleText>{_("Keamanan & TLS")}</TabTitleText>}>
-                                <div className="modal-tab-content">
-                                    {formUpstreamScheme === 'https' ? (
-                                        <FormGroup role="group" fieldId="security-tls" label={_("Sertifikat Backend Upstream")}>
-                                            <Checkbox
-                                                id="route-insecure-tls"
-                                                label={_("Abaikan Verifikasi Sertifikat TLS Backend (Insecure / Self-Signed)")}
-                                                description={_("Wajib dicentang jika backend menggunakan sertifikat buatan sendiri seperti Cockpit 9090 atau server LAN lokal.")}
-                                                isChecked={formInsecureSkipVerify}
-                                                onChange={(_event, val) => setFormInsecureSkipVerify(val)}
-                                            />
-                                        </FormGroup>
-                                    ) : (
-                                        <Alert
-                                            variant="info"
-                                            isInline
-                                            title={_("Backend menggunakan HTTP biasa")}
-                                        >
-                                            {_("Verifikasi sertifikat backend tidak diperlukan untuk upstream HTTP. Jika backend Anda menggunakan HTTPS, ubah protokol di tab Utama.")}
-                                        </Alert>
-                                    )}
-
-                                    <div style={{ marginTop: '16px' }}>
-                                        <FormGroup role="group" fieldId="security-hsts" label={_("Keamanan Browser (HSTS)")}>
-                                            <Checkbox
-                                                id="route-hsts"
-                                                label={_("Aktifkan HSTS (HTTP Strict Transport Security)")}
-                                                description={_("Memerintahkan browser klien untuk selalu mengakses domain melalui koneksi HTTPS yang terenkripsi aman.")}
-                                                isChecked={formHsts}
-                                                onChange={(_event, val) => setFormHsts(val)}
-                                            />
-                                        </FormGroup>
-                                    </div>
-                                </div>
-                            </Tab>
-                        </Tabs>
+                            <FormGroup label={_("Route ID")} fieldId="route-id">
+                                <TextInput
+                                    id="route-id"
+                                    placeholder="proxy_1"
+                                    value={formId}
+                                    {...(editingRouteId ? { readOnlyVariant: 'default' as const } : {})}
+                                    onChange={(_event, val) => setFormId(val)}
+                                />
+                                <FormHelperText>
+                                    <HelperText>
+                                        <HelperTextItem>{_("Pengenal unik rute ini di Caddy.")}</HelperTextItem>
+                                    </HelperText>
+                                </FormHelperText>
+                            </FormGroup>
+                        </ExpandableSection>
                     </Form>
                 </ModalBody>
                 <ModalFooter>
