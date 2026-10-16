@@ -193,15 +193,6 @@ export const Application = () => {
         setAlerts(prev => prev.filter(a => a.id !== id));
     };
 
-    // Setelah Caddy reload config, koneksi Cockpit bisa putus: muat ulang halaman saja
-    const reloadPage = () => {
-        setLoading(true);
-        window.location.reload();
-    };
-
-    const isDisconnectError = (err: any) =>
-        err?.problem === 'disconnected' || err?.problem === 'terminated';
-
     // Load Caddy Config
     const loadConfig = async () => {
         setLoading(true);
@@ -229,6 +220,7 @@ export const Application = () => {
                         srv.routes.forEach((route: any, index: number) => {
                             const handleList = route.handle || [];
                             const proxyHandler = handleList.find((h: any) => h.handler === 'reverse_proxy');
+                            const varsHandler = handleList.find((h: any) => h.handler === 'vars');
                             const fileHandler = handleList.find((h: any) => h.handler === 'file_server');
 
                             if (proxyHandler || fileHandler) {
@@ -279,7 +271,7 @@ export const Application = () => {
                                     hasHeaders,
                                     hasCompression,
                                     hasHsts,
-                                    root: fileHandler?.root || '',
+                                    root: fileHandler?.root || varsHandler?.root || '',
                                     hasSpa,
                                     hasBrowse: !!fileHandler?.browse,
                                     hasStreamDelay: !!proxyHandler?.stream_close_delay
@@ -445,6 +437,7 @@ export const Application = () => {
     // Bangun daftar handler untuk rute situs statis (folder)
     const buildStaticHandlers = (rootPath: string): any[] => {
         const handlers: any[] = [];
+        handlers.push({ handler: "vars", root: rootPath });
         if (formCompression) {
             handlers.push({ handler: "encode", encodings: { gzip: {}, zstd: {} } });
         }
