@@ -49,6 +49,8 @@ interface CaddyRoute {
     upstreams: string[];
     rawRoute: any;
     isHttps: boolean;
+    isUpstreamHttps: boolean;
+    insecureSkipVerify: boolean;
     hasHeaders: boolean;
 }
 
@@ -129,6 +131,8 @@ export const Application = () => {
     const [formUpstreams, setFormUpstreams] = useState<string>('');
     const [formId, setFormId] = useState<string>('');
     const [formHeaders, setFormHeaders] = useState<boolean>(true);
+    const [formUpstreamHttps, setFormUpstreamHttps] = useState<boolean>(false);
+    const [formInsecureSkipVerify, setFormInsecureSkipVerify] = useState<boolean>(true);
     const [formSubmitting, setFormSubmitting] = useState<boolean>(false);
 
     // Modal konfirmasi hapus
@@ -193,6 +197,8 @@ export const Application = () => {
 
                                 const hasHeaders = !!(proxyHandler.headers && proxyHandler.headers.request);
                                 const isHttps = hosts.some(h => !h.includes(':') && h !== '*' && !h.endsWith('.localhost'));
+                                const isUpstreamHttps = !!(proxyHandler.transport && proxyHandler.transport.tls);
+                                const insecureSkipVerify = !!(proxyHandler.transport?.tls?.insecure_skip_verify);
 
                                 parsedRoutes.push({
                                     id: route['@id'] || `srv_${sKey}_route_${index}`,
@@ -203,6 +209,8 @@ export const Application = () => {
                                     upstreams,
                                     rawRoute: route,
                                     isHttps,
+                                    isUpstreamHttps,
+                                    insecureSkipVerify,
                                     hasHeaders
                                 });
                             }
@@ -243,21 +251,57 @@ export const Application = () => {
         setFormUpstreams('');
         setFormId(`proxy_${Date.now()}`);
         setFormHeaders(true);
+        setFormUpstreamHttps(false);
+        setFormInsecureSkipVerify(true);
         setIsModalOpen(true);
     };
 
     const openEditModal = (route: CaddyRoute) => {
         setEditingRouteId(route.id);
         setFormDomains(route.hosts.join(', '));
-        setFormUpstreams(route.upstreams.join(', '));
+        setFormUpstreams(route.upstreams.map(u => (route.isUpstreamHttps ? `https://${u}` : u)).join(', '));
         setFormId(route.hasRealId ? route.id : `proxy_${Date.now()}`);
         setFormHeaders(route.hasHeaders);
+        setFormUpstreamHttps(route.isUpstreamHttps);
+        setFormInsecureSkipVerify(route.insecureSkipVerify);
         setIsModalOpen(true);
     };
 
     const closeModal = () => {
         setIsModalOpen(false);
         setEditingRouteId(null);
+    };
+
+    // Auto-fix server configuration: ensure :443 and :80 listen ports, and clean Debian dummy route
+    const ensureServerConfig = async (sPath: string) => {
+        try {
+            const currentListen = await caddyRequest(`${sPath}/listen`);
+            if (Array.isArray(currentListen)) {
+                const has443 = currentListen.some(p => p.includes('443'));
+                const has80 = currentListen.some(p => p.includes('80'));
+                if (!has443 || !has80) {
+                    const updated = Array.from(new Set([...currentListen, ":443", ":80"]));
+                    await caddyRequest(`${sPath}/listen`, 'POST', updated);
+                }
+            }
+        } catch {
+            // Ignore if /listen endpoint doesn't exist yet
+        }
+
+        try {
+            const existingRoutes = await caddyRequest(`${sPath}/routes`);
+            if (Array.isArray(existingRoutes)) {
+                const dummyIdx = existingRoutes.findIndex(
+                    (r: any) => (!r.match || r.match.length === 0) &&
+                                r.handle?.some((h: any) => h.handler === 'file_server' || h.handler === 'vars')
+                );
+                if (dummyIdx !== -1) {
+                    await caddyRequest(`${sPath}/routes/${dummyIdx}`, 'DELETE');
+                }
+            }
+        } catch {
+            // Ignore if cleanup not applicable
+        }
     };
 
     // Save Route
@@ -275,15 +319,20 @@ export const Application = () => {
         }
 
         const routeId = formId.trim() || `proxy_${Date.now()}`;
-        const newRoute: any = {
-            "@id": routeId,
-            match: [{ host: domains }],
-            handle: [{ handler: "reverse_proxy", upstreams: upstreamsList }],
-            terminal: true
+        const proxyHandler: any = {
+            handler: "reverse_proxy",
+            upstreams: upstreamsList
         };
 
+        if (formUpstreamHttps) {
+            proxyHandler.transport = {
+                protocol: "http",
+                tls: formInsecureSkipVerify ? { insecure_skip_verify: true } : {}
+            };
+        }
+
         if (formHeaders) {
-            newRoute.handle[0].headers = {
+            proxyHandler.headers = {
                 request: {
                     set: {
                         Host: ["{http.request.host}"],
@@ -295,8 +344,18 @@ export const Application = () => {
             };
         }
 
+        const newRoute: any = {
+            "@id": routeId,
+            match: [{ host: domains }],
+            handle: [proxyHandler],
+            terminal: true
+        };
+
         setFormSubmitting(true);
         try {
+            const sPath = `/config/apps/http/servers/${serverName}`;
+            await ensureServerConfig(sPath);
+
             if (editingRouteId) {
                 const existing = routes.find(r => r.id === editingRouteId);
                 if (existing && existing.hasRealId) {
@@ -414,7 +473,19 @@ export const Application = () => {
         let out = '# Representasi Caddyfile dari reverse_proxy yang aktif:\n\n';
         routes.forEach(r => {
             out += `${r.hosts.join(', ')} {\n`;
-            out += `    reverse_proxy ${r.upstreams.join(' ')}\n`;
+            if (r.isUpstreamHttps) {
+                out += `    reverse_proxy ${r.upstreams.join(' ')} {\n`;
+                out += `        transport http {\n`;
+                if (r.insecureSkipVerify) {
+                    out += `            tls_insecure_skip_verify\n`;
+                } else {
+                    out += `            tls\n`;
+                }
+                out += `        }\n`;
+                out += `    }\n`;
+            } else {
+                out += `    reverse_proxy ${r.upstreams.join(' ')}\n`;
+            }
             out += '}\n\n';
         });
         return out;
@@ -482,7 +553,18 @@ export const Application = () => {
                             <Td dataLabel={_("Fitur")}>
                                 <Flex spaceItems={{ default: 'spaceItemsSm' }}>
                                     {route.isHttps && (
-                                        <FlexItem><Label color="green" isCompact>HTTPS</Label></FlexItem>
+                                        <FlexItem><Label color="green" isCompact>Auto-TLS</Label></FlexItem>
+                                    )}
+                                    {route.isUpstreamHttps ? (
+                                        <FlexItem>
+                                            <Label color="purple" isCompact>
+                                                {route.insecureSkipVerify ? "Upstream: HTTPS (Insecure)" : "Upstream: HTTPS"}
+                                            </Label>
+                                        </FlexItem>
+                                    ) : (
+                                        <FlexItem>
+                                            <Label color="grey" isCompact>Upstream: HTTP</Label>
+                                        </FlexItem>
                                     )}
                                     {route.hasHeaders && (
                                         <FlexItem><Label color="blue" isCompact>{_("Header")}</Label></FlexItem>
@@ -674,17 +756,43 @@ export const Application = () => {
                             <TextInput
                                 id="route-upstreams"
                                 isRequired
-                                placeholder="127.0.0.1:3000, 192.168.1.50:8080"
+                                placeholder="127.0.0.1:3000 atau https://127.0.0.1:9090"
                                 value={formUpstreams}
-                                onChange={(_event, val) => setFormUpstreams(val)}
+                                onChange={(_event, val) => {
+                                    setFormUpstreams(val);
+                                    if (val.toLowerCase().includes('https://')) {
+                                        setFormUpstreamHttps(true);
+                                    }
+                                }}
                             />
                             <FormHelperText>
                                 <HelperText>
                                     <HelperTextItem>
-                                        {_("Format host:port. Pisahkan dengan koma untuk load balancing.")}
+                                        {_("Format host:port atau https://host:port. Pisahkan dengan koma untuk load balancing.")}
                                     </HelperTextItem>
                                 </HelperText>
                             </FormHelperText>
+                        </FormGroup>
+
+                        <FormGroup role="group" fieldId="route-upstream-tls" label={_("Protokol Upstream")}>
+                            <Checkbox
+                                id="route-upstream-https"
+                                label={_("Target upstream menggunakan HTTPS / TLS")}
+                                description={_("Wajib dicentang jika aplikasi target menggunakan HTTPS (contoh: Cockpit port 9090, Proxmox port 8006).")}
+                                isChecked={formUpstreamHttps}
+                                onChange={(_event, val) => setFormUpstreamHttps(val)}
+                            />
+                            {formUpstreamHttps && (
+                                <div style={{ marginTop: '10px', marginLeft: '24px' }}>
+                                    <Checkbox
+                                        id="route-insecure-tls"
+                                        label={_("Abaikan verifikasi SSL / Insecure (Self-signed)")}
+                                        description={_("Abaikan error sertifikat internal self-signed (sangat disarankan untuk Cockpit 9090).")}
+                                        isChecked={formInsecureSkipVerify}
+                                        onChange={(_event, val) => setFormInsecureSkipVerify(val)}
+                                    />
+                                </div>
+                            )}
                         </FormGroup>
 
                         <FormGroup label={_("Route ID")} fieldId="route-id">
