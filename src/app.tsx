@@ -196,7 +196,7 @@ export const Application = () => {
     // Setelah Caddy reload config, koneksi Cockpit bisa putus: muat ulang halaman saja
     const reloadPage = () => {
         setLoading(true);
-        setTimeout(() => window.location.reload(), 1000);
+        window.location.reload();
     };
 
     const isDisconnectError = (err: any) =>
