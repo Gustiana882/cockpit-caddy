@@ -302,20 +302,19 @@ export const Application = () => {
         setModalError(null);
     };
 
-    // Auto-fix server configuration: ensure :443 and :80 listen ports, and clean Debian dummy route
+    // Auto-fix server configuration: ensure :443 listen port for Automatic HTTPS, and clean Debian dummy route
     const ensureServerConfig = async (sPath: string) => {
         try {
             const currentListen = await caddyRequest(`${sPath}/listen`);
             if (Array.isArray(currentListen)) {
                 const has443 = currentListen.some(p => p.includes('443'));
-                const has80 = currentListen.some(p => p.includes('80'));
-                if (!has443 || !has80) {
-                    const updated = Array.from(new Set([...currentListen, ":443", ":80"]));
-                    await caddyRequest(`${sPath}/listen`, 'POST', updated);
+                if (!has443) {
+                    // Update server listen to :443 via PATCH so Caddy activates Automatic HTTPS
+                    await caddyRequest(`${sPath}/listen`, 'PATCH', [":443"]);
                 }
             }
-        } catch {
-            // Ignore if /listen endpoint doesn't exist yet
+        } catch (err) {
+            console.warn('Failed to update listen port to :443:', err);
         }
 
         try {
