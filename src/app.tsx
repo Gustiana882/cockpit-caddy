@@ -193,6 +193,15 @@ export const Application = () => {
         setAlerts(prev => prev.filter(a => a.id !== id));
     };
 
+    // Setelah Caddy reload config, koneksi Cockpit bisa putus: muat ulang halaman saja
+    const reloadPage = () => {
+        setLoading(true);
+        setTimeout(() => window.location.reload(), 1000);
+    };
+
+    const isDisconnectError = (err: any) =>
+        err?.problem === 'disconnected' || err?.problem === 'terminated';
+
     // Load Caddy Config
     const loadConfig = async () => {
         setLoading(true);
@@ -547,9 +556,14 @@ export const Application = () => {
             }
 
             closeModal();
-            await loadConfig();
+            reloadPage();
         } catch (err: any) {
             console.error('Error saving route:', err);
+            if (isDisconnectError(err)) {
+                closeModal();
+                reloadPage();
+                return;
+            }
             setModalError(err.message || _("Gagal menyimpan konfigurasi"));
         } finally {
             setFormSubmitting(false);
@@ -587,9 +601,14 @@ export const Application = () => {
             await deleteRouteInternal(routeToDelete.id);
             addAlert(_("Terhapus"), "success", `Rute ${domainStr} berhasil dihapus.`);
             setRouteToDelete(null);
-            await loadConfig();
+            reloadPage();
         } catch (err: any) {
             console.error('Failed to delete route:', err);
+            if (isDisconnectError(err)) {
+                setRouteToDelete(null);
+                reloadPage();
+                return;
+            }
             addAlert(_("Gagal menghapus"), "danger", err.message);
         } finally {
             setDeleting(false);
@@ -608,7 +627,7 @@ export const Application = () => {
                 await caddyRequest('/load', 'POST', rawConfig);
                 addAlert(_("Sukses"), "success", _("Konfigurasi Caddy dimuat ulang via Admin API"));
             }
-            await loadConfig();
+            reloadPage();
         } catch (err: any) {
             addAlert(_("Gagal reload Caddy"), "danger", err.message);
         }
@@ -621,7 +640,7 @@ export const Application = () => {
             const parsed = JSON.parse(rawEditorText);
             await caddyRequest('/load', 'POST', parsed);
             addAlert(_("Konfigurasi diterapkan"), "success", _("Konfigurasi JSON Caddy berhasil diperbarui"));
-            await loadConfig();
+            reloadPage();
         } catch (err: any) {
             addAlert(_("Gagal menerapkan konfigurasi"), "danger", err.message);
         } finally {
@@ -826,9 +845,9 @@ export const Application = () => {
                     usePageInsets
                     aria-label={_("Bagian plugin Caddy")}
                 >
-                    <Tab eventKey={0} title={<TabTitleText>{_("Rute")}</TabTitleText>} aria-label={_("Rute")} />
-                    <Tab eventKey={1} title={<TabTitleText>{_("Konfigurasi JSON")}</TabTitleText>} aria-label={_("Konfigurasi JSON")} />
-                    <Tab eventKey={2} title={<TabTitleText>{_("Pratinjau Caddyfile")}</TabTitleText>} aria-label={_("Pratinjau Caddyfile")} />
+                    <Tab eventKey={0} title={<TabTitleText style={{ minWidth: "100px", justifyContent: "center" }}>{_("Rute")}</TabTitleText>} aria-label={_("Rute")} />
+                    <Tab eventKey={1} title={<TabTitleText style={{ minWidth: "100px", justifyContent: "center" }}>{_("Konfigurasi JSON")}</TabTitleText>} aria-label={_("Konfigurasi JSON")} />
+                    <Tab eventKey={2} title={<TabTitleText style={{ minWidth: "100px", justifyContent: "center" }}>{_("Pratinjau Caddyfile")}</TabTitleText>} aria-label={_("Pratinjau Caddyfile")} />
                 </Tabs>
             </PageSection>
 
