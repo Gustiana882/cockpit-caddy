@@ -21,6 +21,7 @@ import { HelperText, HelperTextItem } from '@patternfly/react-core/dist/esm/comp
 import { TextInput } from '@patternfly/react-core/dist/esm/components/TextInput/index.js';
 import { TextArea } from '@patternfly/react-core/dist/esm/components/TextArea/index.js';
 import { Checkbox } from '@patternfly/react-core/dist/esm/components/Checkbox/index.js';
+import { Radio } from '@patternfly/react-core/dist/esm/components/Radio/index.js';
 import { SearchInput } from '@patternfly/react-core/dist/esm/components/SearchInput/index.js';
 import { EmptyState, EmptyStateBody, EmptyStateFooter, EmptyStateActions } from '@patternfly/react-core/dist/esm/components/EmptyState/index.js';
 import { Toolbar, ToolbarContent, ToolbarItem } from '@patternfly/react-core/dist/esm/components/Toolbar/index.js';
@@ -51,7 +52,10 @@ interface CaddyRoute {
     isHttps: boolean;
     isUpstreamHttps: boolean;
     insecureSkipVerify: boolean;
+    hasWebsocket: boolean;
     hasHeaders: boolean;
+    hasCompression: boolean;
+    hasHsts: boolean;
 }
 
 interface NotificationAlert {
@@ -126,14 +130,19 @@ export const Application = () => {
 
     // Modal state (tambah / edit)
     const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+    const [modalTab, setModalTab] = useState<number | string>(0);
     const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
     const [formDomains, setFormDomains] = useState<string>('');
     const [formUpstreams, setFormUpstreams] = useState<string>('');
+    const [formUpstreamScheme, setFormUpstreamScheme] = useState<'http' | 'https'>('http');
+    const [formInsecureSkipVerify, setFormInsecureSkipVerify] = useState<boolean>(true);
     const [formId, setFormId] = useState<string>('');
     const [formHeaders, setFormHeaders] = useState<boolean>(true);
-    const [formUpstreamHttps, setFormUpstreamHttps] = useState<boolean>(false);
-    const [formInsecureSkipVerify, setFormInsecureSkipVerify] = useState<boolean>(true);
+    const [formWebsocket, setFormWebsocket] = useState<boolean>(true);
+    const [formCompression, setFormCompression] = useState<boolean>(true);
+    const [formHsts, setFormHsts] = useState<boolean>(false);
     const [formSubmitting, setFormSubmitting] = useState<boolean>(false);
+    const [modalError, setModalError] = useState<string | null>(null);
 
     // Modal konfirmasi hapus
     const [routeToDelete, setRouteToDelete] = useState<CaddyRoute | null>(null);
@@ -199,6 +208,9 @@ export const Application = () => {
                                 const isHttps = hosts.some(h => !h.includes(':') && h !== '*' && !h.endsWith('.localhost'));
                                 const isUpstreamHttps = !!(proxyHandler.transport && proxyHandler.transport.tls);
                                 const insecureSkipVerify = !!(proxyHandler.transport?.tls?.insecure_skip_verify);
+                                const hasWebsocket = proxyHandler.flush_interval === -1;
+                                const hasCompression = handleList.some((h: any) => h.handler === 'encode');
+                                const hasHsts = !!(proxyHandler.headers?.response?.set?.['Strict-Transport-Security']);
 
                                 parsedRoutes.push({
                                     id: route['@id'] || `srv_${sKey}_route_${index}`,
@@ -211,7 +223,10 @@ export const Application = () => {
                                     isHttps,
                                     isUpstreamHttps,
                                     insecureSkipVerify,
-                                    hasHeaders
+                                    hasWebsocket,
+                                    hasHeaders,
+                                    hasCompression,
+                                    hasHsts
                                 });
                             }
                         });
@@ -246,30 +261,41 @@ export const Application = () => {
 
     // Modal controls
     const openAddModal = () => {
+        setModalTab(0);
+        setModalError(null);
         setEditingRouteId(null);
         setFormDomains('');
         setFormUpstreams('');
+        setFormUpstreamScheme('http');
+        setFormInsecureSkipVerify(true);
         setFormId(`proxy_${Date.now()}`);
         setFormHeaders(true);
-        setFormUpstreamHttps(false);
-        setFormInsecureSkipVerify(true);
+        setFormWebsocket(true);
+        setFormCompression(true);
+        setFormHsts(false);
         setIsModalOpen(true);
     };
 
     const openEditModal = (route: CaddyRoute) => {
+        setModalTab(0);
+        setModalError(null);
         setEditingRouteId(route.id);
         setFormDomains(route.hosts.join(', '));
-        setFormUpstreams(route.upstreams.map(u => (route.isUpstreamHttps ? `https://${u}` : u)).join(', '));
+        setFormUpstreams(route.upstreams.join(', '));
+        setFormUpstreamScheme(route.isUpstreamHttps ? 'https' : 'http');
+        setFormInsecureSkipVerify(route.insecureSkipVerify);
         setFormId(route.hasRealId ? route.id : `proxy_${Date.now()}`);
         setFormHeaders(route.hasHeaders);
-        setFormUpstreamHttps(route.isUpstreamHttps);
-        setFormInsecureSkipVerify(route.insecureSkipVerify);
+        setFormWebsocket(route.hasWebsocket);
+        setFormCompression(route.hasCompression);
+        setFormHsts(route.hasHsts);
         setIsModalOpen(true);
     };
 
     const closeModal = () => {
         setIsModalOpen(false);
         setEditingRouteId(null);
+        setModalError(null);
     };
 
     // Auto-fix server configuration: ensure :443 and :80 listen ports, and clean Debian dummy route
@@ -309,11 +335,12 @@ export const Application = () => {
         e.preventDefault();
         const domains = formDomains.split(',').map(d => d.trim()).filter(Boolean);
         const upstreamsList = formUpstreams.split(',').map(u => {
-            const clean = u.trim().replace(/^https?:\/\//, '');
+            const clean = u.trim().replace(/^https?:\/\//i, '');
             return { dial: clean };
         }).filter(u => u.dial);
 
         if (domains.length === 0 || upstreamsList.length === 0) {
+            setModalError(_("Harap isi Domain dan Target Upstream"));
             addAlert(_("Input tidak lengkap"), "danger", _("Harap isi Domain dan Target Upstream"));
             return;
         }
@@ -324,30 +351,57 @@ export const Application = () => {
             upstreams: upstreamsList
         };
 
-        if (formUpstreamHttps) {
+        if (formWebsocket) {
+            proxyHandler.flush_interval = -1;
+        }
+
+        if (formUpstreamScheme === 'https') {
             proxyHandler.transport = {
                 protocol: "http",
                 tls: formInsecureSkipVerify ? { insecure_skip_verify: true } : {}
             };
         }
 
+        const headersObj: any = {};
         if (formHeaders) {
-            proxyHandler.headers = {
-                request: {
-                    set: {
-                        Host: ["{http.request.host}"],
-                        "X-Real-IP": ["{http.request.remote.host}"],
-                        "X-Forwarded-For": ["{http.request.remote.host}"],
-                        "X-Forwarded-Proto": ["{http.request.scheme}"]
-                    }
+            headersObj.request = {
+                set: {
+                    Host: ["{http.request.host}"],
+                    "X-Real-IP": ["{http.request.remote.host}"],
+                    "X-Forwarded-For": ["{http.request.remote.host}"],
+                    "X-Forwarded-Proto": ["{http.request.scheme}"]
                 }
             };
         }
 
+        if (formHsts) {
+            headersObj.response = {
+                set: {
+                    "Strict-Transport-Security": ["max-age=31536000; includeSubDomains; preload"]
+                }
+            };
+        }
+
+        if (headersObj.request || headersObj.response) {
+            proxyHandler.headers = headersObj;
+        }
+
+        const handlers: any[] = [];
+        if (formCompression) {
+            handlers.push({
+                handler: "encode",
+                encodings: {
+                    gzip: {},
+                    zstd: {}
+                }
+            });
+        }
+        handlers.push(proxyHandler);
+
         const newRoute: any = {
             "@id": routeId,
             match: [{ host: domains }],
-            handle: [proxyHandler],
+            handle: handlers,
             terminal: true
         };
 
@@ -374,6 +428,7 @@ export const Application = () => {
             await loadConfig();
         } catch (err: any) {
             console.error('Error saving route:', err);
+            setModalError(err.message || _("Gagal menyimpan konfigurasi"));
             addAlert(_("Gagal menyimpan"), "danger", err.message);
         } finally {
             setFormSubmitting(false);
@@ -473,15 +528,26 @@ export const Application = () => {
         let out = '# Representasi Caddyfile dari reverse_proxy yang aktif:\n\n';
         routes.forEach(r => {
             out += `${r.hosts.join(', ')} {\n`;
-            if (r.isUpstreamHttps) {
+            if (r.hasCompression) {
+                out += `    encode gzip zstd\n`;
+            }
+            if (r.hasHsts) {
+                out += `    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"\n`;
+            }
+            if (r.isUpstreamHttps || r.hasWebsocket) {
                 out += `    reverse_proxy ${r.upstreams.join(' ')} {\n`;
-                out += `        transport http {\n`;
-                if (r.insecureSkipVerify) {
-                    out += `            tls_insecure_skip_verify\n`;
-                } else {
-                    out += `            tls\n`;
+                if (r.isUpstreamHttps) {
+                    out += `        transport http {\n`;
+                    if (r.insecureSkipVerify) {
+                        out += `            tls_insecure_skip_verify\n`;
+                    } else {
+                        out += `            tls\n`;
+                    }
+                    out += `        }\n`;
                 }
-                out += `        }\n`;
+                if (r.hasWebsocket) {
+                    out += `        flush_interval -1\n`;
+                }
                 out += `    }\n`;
             } else {
                 out += `    reverse_proxy ${r.upstreams.join(' ')}\n`;
@@ -523,7 +589,7 @@ export const Application = () => {
         }
 
         return (
-            <Table aria-label={_("Daftar reverse proxy")} variant="compact">
+            <Table aria-label={_("Daftar reverse proxy")} variant="compact" className="caddy-table">
                 <Thead>
                     <Tr>
                         <Th>{_("Domain / Host")}</Th>
@@ -536,35 +602,40 @@ export const Application = () => {
                     {filteredRoutes.map(route => (
                         <Tr key={route.id}>
                             <Td dataLabel={_("Domain / Host")}>
-                                <div>{route.hosts.join(', ')}</div>
-                                <Content component="small">
+                                <div className="caddy-route-name">{route.hosts.join(', ')}</div>
+                                <div className="caddy-route-id">
                                     {route.hasRealId ? `ID: ${route.id}` : `${_("Indeks")} #${route.routeIndex}`}
-                                </Content>
+                                </div>
                             </Td>
                             <Td dataLabel={_("Target upstream")}>
-                                <Flex spaceItems={{ default: 'spaceItemsSm' }}>
+                                <Flex spaceItems={{ default: 'spaceItemsXs' }} flexWrap={{ default: 'wrap' }}>
                                     {route.upstreams.map((u, i) => (
                                         <FlexItem key={i}>
-                                            <Label variant="outline" isCompact>{u}</Label>
+                                            <Label variant="outline" isCompact>
+                                                {route.isUpstreamHttps ? `https://${u}` : u}
+                                            </Label>
                                         </FlexItem>
                                     ))}
                                 </Flex>
                             </Td>
                             <Td dataLabel={_("Fitur")}>
-                                <Flex spaceItems={{ default: 'spaceItemsSm' }}>
+                                <Flex spaceItems={{ default: 'spaceItemsSm' }} flexWrap={{ default: 'wrap' }}>
                                     {route.isHttps && (
                                         <FlexItem><Label color="green" isCompact>Auto-TLS</Label></FlexItem>
                                     )}
-                                    {route.isUpstreamHttps ? (
+                                    {route.isUpstreamHttps && (
                                         <FlexItem>
-                                            <Label color="purple" isCompact>
-                                                {route.insecureSkipVerify ? "Upstream: HTTPS (Insecure)" : "Upstream: HTTPS"}
-                                            </Label>
+                                            <Label color="purple" isCompact>Upstream: HTTPS</Label>
                                         </FlexItem>
-                                    ) : (
-                                        <FlexItem>
-                                            <Label color="grey" isCompact>Upstream: HTTP</Label>
-                                        </FlexItem>
+                                    )}
+                                    {route.hasWebsocket && (
+                                        <FlexItem><Label color="teal" isCompact>WebSocket</Label></FlexItem>
+                                    )}
+                                    {route.hasCompression && (
+                                        <FlexItem><Label color="orange" isCompact>Gzip/Zstd</Label></FlexItem>
+                                    )}
+                                    {route.hasHsts && (
+                                        <FlexItem><Label color="yellow" isCompact>HSTS</Label></FlexItem>
                                     )}
                                     {route.hasHeaders && (
                                         <FlexItem><Label color="blue" isCompact>{_("Header")}</Label></FlexItem>
@@ -734,86 +805,179 @@ export const Application = () => {
                     labelId="modal-route-title"
                 />
                 <ModalBody>
-                    <Form id="route-form" onSubmit={handleSaveRoute} isHorizontal>
-                        <FormGroup label={_("Domain / Hostname")} isRequired fieldId="route-domains">
-                            <TextInput
-                                id="route-domains"
-                                isRequired
-                                placeholder="app.domain.com, api.domain.com"
-                                value={formDomains}
-                                onChange={(_event, val) => setFormDomains(val)}
-                            />
-                            <FormHelperText>
-                                <HelperText>
-                                    <HelperTextItem>
-                                        {_("Pisahkan dengan koma untuk beberapa domain pada upstream yang sama.")}
-                                    </HelperTextItem>
-                                </HelperText>
-                            </FormHelperText>
-                        </FormGroup>
+                    {modalError && (
+                        <Alert
+                            variant="danger"
+                            isInline
+                            title={_("Gagal menyimpan")}
+                            style={{ marginBottom: '16px' }}
+                        >
+                            {modalError}
+                        </Alert>
+                    )}
+                    <Form id="route-form" onSubmit={handleSaveRoute}>
+                        <Tabs
+                            activeKey={modalTab}
+                            onSelect={(_event, key) => setModalTab(key)}
+                            isBox
+                            aria-label={_("Tab konfigurasi proxy")}
+                        >
+                            {/* TAB 0: Konfigurasi Utama */}
+                            <Tab eventKey={0} title={<TabTitleText>{_("Utama")}</TabTitleText>}>
+                                <div className="modal-tab-content">
+                                    <FormGroup label={_("Domain / Hostname")} isRequired fieldId="route-domains">
+                                        <TextInput
+                                            id="route-domains"
+                                            isRequired
+                                            placeholder="app.domain.com, api.domain.com"
+                                            value={formDomains}
+                                            onChange={(_event, val) => setFormDomains(val)}
+                                        />
+                                        <FormHelperText>
+                                            <HelperText>
+                                                <HelperTextItem>
+                                                    {_("Domain publik yang mengarah ke server ini. Pisahkan koma untuk multiple domain.")}
+                                                </HelperTextItem>
+                                            </HelperText>
+                                        </FormHelperText>
+                                    </FormGroup>
 
-                        <FormGroup label={_("Target upstream")} isRequired fieldId="route-upstreams">
-                            <TextInput
-                                id="route-upstreams"
-                                isRequired
-                                placeholder="127.0.0.1:3000 atau https://127.0.0.1:9090"
-                                value={formUpstreams}
-                                onChange={(_event, val) => {
-                                    setFormUpstreams(val);
-                                    if (val.toLowerCase().includes('https://')) {
-                                        setFormUpstreamHttps(true);
-                                    }
-                                }}
-                            />
-                            <FormHelperText>
-                                <HelperText>
-                                    <HelperTextItem>
-                                        {_("Format host:port atau https://host:port. Pisahkan dengan koma untuk load balancing.")}
-                                    </HelperTextItem>
-                                </HelperText>
-                            </FormHelperText>
-                        </FormGroup>
+                                    <FormGroup label={_("Target Upstream (IP:Port)")} isRequired fieldId="route-upstreams">
+                                        <TextInput
+                                            id="route-upstreams"
+                                            isRequired
+                                            placeholder="127.0.0.1:3000, 192.168.1.50:8080"
+                                            value={formUpstreams}
+                                            onChange={(_event, val) => {
+                                                setFormUpstreams(val);
+                                                if (val.toLowerCase().includes('https://')) {
+                                                    setFormUpstreamScheme('https');
+                                                }
+                                            }}
+                                        />
+                                        <FormHelperText>
+                                            <HelperText>
+                                                <HelperTextItem>
+                                                    {_("IP/Host dan port aplikasi backend. Pisahkan koma untuk load balancing.")}
+                                                </HelperTextItem>
+                                            </HelperText>
+                                        </FormHelperText>
+                                    </FormGroup>
 
-                        <FormGroup role="group" fieldId="route-upstream-tls" label={_("Protokol Upstream")}>
-                            <Checkbox
-                                id="route-upstream-https"
-                                label={_("Target upstream menggunakan HTTPS / TLS")}
-                                description={_("Wajib dicentang jika aplikasi target menggunakan HTTPS (contoh: Cockpit port 9090, Proxmox port 8006).")}
-                                isChecked={formUpstreamHttps}
-                                onChange={(_event, val) => setFormUpstreamHttps(val)}
-                            />
-                            {formUpstreamHttps && (
-                                <div style={{ marginTop: '10px', marginLeft: '24px' }}>
-                                    <Checkbox
-                                        id="route-insecure-tls"
-                                        label={_("Abaikan verifikasi SSL / Insecure (Self-signed)")}
-                                        description={_("Abaikan error sertifikat internal self-signed (sangat disarankan untuk Cockpit 9090).")}
-                                        isChecked={formInsecureSkipVerify}
-                                        onChange={(_event, val) => setFormInsecureSkipVerify(val)}
-                                    />
+                                    <FormGroup role="radiogroup" fieldId="route-scheme" label={_("Protokol / Skema Backend")}>
+                                        <Flex spaceItems={{ default: 'spaceItemsLg' }}>
+                                            <FlexItem>
+                                                <Radio
+                                                    id="scheme-http"
+                                                    name="upstream-scheme"
+                                                    label={_("HTTP (Standar untuk Docker, Node.js, Python, PHP, dll)")}
+                                                    isChecked={formUpstreamScheme === 'http'}
+                                                    onChange={() => setFormUpstreamScheme('http')}
+                                                />
+                                            </FlexItem>
+                                            <FlexItem>
+                                                <Radio
+                                                    id="scheme-https"
+                                                    name="upstream-scheme"
+                                                    label={_("HTTPS (Untuk Cockpit :9090, Proxmox :8006, dll)")}
+                                                    isChecked={formUpstreamScheme === 'https'}
+                                                    onChange={() => setFormUpstreamScheme('https')}
+                                                />
+                                            </FlexItem>
+                                        </Flex>
+                                    </FormGroup>
+
+                                    <FormGroup label={_("Route ID (Opsional)")} fieldId="route-id">
+                                        <TextInput
+                                            id="route-id"
+                                            placeholder="proxy_1"
+                                            value={formId}
+                                            {...(editingRouteId ? { readOnlyVariant: 'default' as const } : {})}
+                                            onChange={(_event, val) => setFormId(val)}
+                                        />
+                                        <FormHelperText>
+                                            <HelperText>
+                                                <HelperTextItem>
+                                                    {_("Pengenal unik internal di Caddy untuk rute ini.")}
+                                                </HelperTextItem>
+                                            </HelperText>
+                                        </FormHelperText>
+                                    </FormGroup>
                                 </div>
-                            )}
-                        </FormGroup>
+                            </Tab>
 
-                        <FormGroup label={_("Route ID")} fieldId="route-id">
-                            <TextInput
-                                id="route-id"
-                                placeholder="proxy_1"
-                                value={formId}
-                                {...(editingRouteId ? { readOnlyVariant: 'default' as const } : {})}
-                                onChange={(_event, val) => setFormId(val)}
-                            />
-                        </FormGroup>
+                            {/* TAB 1: Fitur & Performa */}
+                            <Tab eventKey={1} title={<TabTitleText>{_("Fitur & Performa")}</TabTitleText>}>
+                                <div className="modal-tab-content">
+                                    <FormGroup role="group" fieldId="feature-websocket" label={_("Koneksi Real-Time")}>
+                                        <Checkbox
+                                            id="route-websocket"
+                                            label={_("Aktifkan WebSocket & Streaming")}
+                                            description={_("Mengaktifkan immediate buffer flush (flush_interval: -1) untuk koneksi dua arah WebSocket (Cockpit web console, Socket.io, Chat, SSH terminal web).")}
+                                            isChecked={formWebsocket}
+                                            onChange={(_event, val) => setFormWebsocket(val)}
+                                        />
+                                    </FormGroup>
 
-                        <FormGroup role="group" fieldId="route-headers" label={_("Opsi")}>
-                            <Checkbox
-                                id="route-headers"
-                                label={_("Teruskan header klien")}
-                                description="Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto"
-                                isChecked={formHeaders}
-                                onChange={(_event, val) => setFormHeaders(val)}
-                            />
-                        </FormGroup>
+                                    <FormGroup role="group" fieldId="feature-compression" label={_("Akselerasi Kecepatan")}>
+                                        <Checkbox
+                                            id="route-compression"
+                                            label={_("Kompresi Respons (Gzip & Zstandard)")}
+                                            description={_("Otomatis mengompresi payload teks/HTML/JSON dari backend untuk menghemat bandwidth dan mempercepat load website.")}
+                                            isChecked={formCompression}
+                                            onChange={(_event, val) => setFormCompression(val)}
+                                        />
+                                    </FormGroup>
+
+                                    <FormGroup role="group" fieldId="feature-headers" label={_("Forwarding Header")}>
+                                        <Checkbox
+                                            id="route-headers"
+                                            label={_("Teruskan Header Klien Asli")}
+                                            description="Menyertakan header Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto agar backend mengetahui IP asli dan protokol pengunjung."
+                                            isChecked={formHeaders}
+                                            onChange={(_event, val) => setFormHeaders(val)}
+                                        />
+                                    </FormGroup>
+                                </div>
+                            </Tab>
+
+                            {/* TAB 2: Keamanan & Lanjutan */}
+                            <Tab eventKey={2} title={<TabTitleText>{_("Keamanan & TLS")}</TabTitleText>}>
+                                <div className="modal-tab-content">
+                                    {formUpstreamScheme === 'https' ? (
+                                        <FormGroup role="group" fieldId="security-tls" label={_("Sertifikat Backend Upstream")}>
+                                            <Checkbox
+                                                id="route-insecure-tls"
+                                                label={_("Abaikan Verifikasi Sertifikat TLS Backend (Insecure / Self-Signed)")}
+                                                description={_("Wajib dicentang jika backend menggunakan sertifikat buatan sendiri seperti Cockpit 9090 atau server LAN lokal.")}
+                                                isChecked={formInsecureSkipVerify}
+                                                onChange={(_event, val) => setFormInsecureSkipVerify(val)}
+                                            />
+                                        </FormGroup>
+                                    ) : (
+                                        <Alert
+                                            variant="info"
+                                            isInline
+                                            title={_("Backend menggunakan HTTP biasa")}
+                                        >
+                                            {_("Verifikasi sertifikat backend tidak diperlukan untuk upstream HTTP. Jika backend Anda menggunakan HTTPS, ubah protokol di tab Utama.")}
+                                        </Alert>
+                                    )}
+
+                                    <div style={{ marginTop: '16px' }}>
+                                        <FormGroup role="group" fieldId="security-hsts" label={_("Keamanan Browser (HSTS)")}>
+                                            <Checkbox
+                                                id="route-hsts"
+                                                label={_("Aktifkan HSTS (HTTP Strict Transport Security)")}
+                                                description={_("Memerintahkan browser klien untuk selalu mengakses domain melalui koneksi HTTPS yang terenkripsi aman.")}
+                                                isChecked={formHsts}
+                                                onChange={(_event, val) => setFormHsts(val)}
+                                            />
+                                        </FormGroup>
+                                    </div>
+                                </div>
+                            </Tab>
+                        </Tabs>
                     </Form>
                 </ModalBody>
                 <ModalFooter>

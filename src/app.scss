@@ -1,2 +1,31 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
+@use "ct-card.scss";
 @use "page.scss";
+@use "_global-variables.scss" as *;
+
+#app .pf-v6-c-card {
+    @extend .ct-card;
+}
+
+// Listing table typography and spacing matching cockpit-podman
+.caddy-route-name {
+    font-size: var(--pf-t--global--font--size--md);
+    font-weight: var(--pf-t--global--font--weight--bold);
+    color: var(--pf-t--global--text--color--regular);
+    word-break: break-all;
+}
+
+.caddy-route-id {
+    font-size: var(--pf-t--global--font--size--sm);
+    color: var(--pf-t--global--text--color--subtle);
+}
+
+.caddy-table {
+    th .pf-v6-c-table__text {
+        min-inline-size: fit-content;
+    }
+}
+
+.modal-tab-content {
+    padding-block-start: var(--pf-t--global--spacer--md);
+}
