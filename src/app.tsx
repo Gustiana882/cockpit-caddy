@@ -47,6 +47,9 @@ const flatCard: React.CSSProperties = { borderRadius: 0 };
 
 const HSTS_VALUE = "max-age=31536000; includeSubDomains; preload";
 
+// Tahan WebSocket tetap hidup saat Caddy reload config (penting agar Cockpit yang diakses lewat Caddy tidak putus)
+const STREAM_CLOSE_DELAY = "1h";
+
 type RouteKind = 'proxy' | 'static';
 
 interface CaddyRoute {
@@ -69,6 +72,7 @@ interface CaddyRoute {
     root: string;
     hasSpa: boolean;
     hasBrowse: boolean;
+    hasStreamDelay: boolean;
 }
 
 interface NotificationAlert {
@@ -268,7 +272,8 @@ export const Application = () => {
                                     hasHsts,
                                     root: fileHandler?.root || '',
                                     hasSpa,
-                                    hasBrowse: !!fileHandler?.browse
+                                    hasBrowse: !!fileHandler?.browse,
+                                    hasStreamDelay: !!proxyHandler?.stream_close_delay
                                 });
                             }
                         });
@@ -391,6 +396,9 @@ export const Application = () => {
             handler: "reverse_proxy",
             upstreams: upstreamsList
         };
+
+        // Cegah koneksi WebSocket (termasuk Cockpit sendiri) putus saat config di-reload
+        proxyHandler.stream_close_delay = STREAM_CLOSE_DELAY;
 
         if (formWebsocket) {
             proxyHandler.flush_interval = -1;
@@ -664,7 +672,7 @@ export const Application = () => {
             if (r.hasHsts) {
                 out += `    header Strict-Transport-Security "${HSTS_VALUE}"\n`;
             }
-            if (r.isUpstreamHttps || r.hasWebsocket) {
+            if (r.isUpstreamHttps || r.hasWebsocket || r.hasStreamDelay) {
                 out += `    reverse_proxy ${r.upstreams.join(' ')} {\n`;
                 if (r.isUpstreamHttps) {
                     out += `        transport http {\n`;
@@ -677,6 +685,9 @@ export const Application = () => {
                 }
                 if (r.hasWebsocket) {
                     out += `        flush_interval -1\n`;
+                }
+                if (r.hasStreamDelay) {
+                    out += `        stream_close_delay ${STREAM_CLOSE_DELAY}\n`;
                 }
                 out += `    }\n`;
             } else {
