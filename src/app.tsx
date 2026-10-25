@@ -84,6 +84,29 @@ interface NotificationAlert {
 
 const CADDY_API_BASE = 'http://127.0.0.1:2019';
 
+async function reloadCaddyService(): Promise<string> {
+    const services = ['caddy-api', 'caddy'];
+    const probeErrors: string[] = [];
+    let activeService: string | undefined;
+
+    for (const service of services) {
+        try {
+            await cockpit.spawn(['systemctl', 'is-active', '--quiet', service], { superuser: 'try' });
+            activeService = service;
+            break;
+        } catch (err: any) {
+            probeErrors.push(`${service}: ${err.message || String(err)}`);
+        }
+    }
+
+    if (!activeService) {
+        throw new Error(`No active Caddy systemd service found. Checked ${services.join(' and ')}. ${probeErrors.join('; ')}`);
+    }
+
+    await cockpit.spawn(['systemctl', 'reload', activeService], { superuser: 'try' });
+    return activeService;
+}
+
 async function caddyRequest(path: string, method: string = 'GET', data: any = null): Promise<any> {
     const url = `${CADDY_API_BASE}${path}`;
     const isCockpit = typeof cockpit !== 'undefined' && typeof cockpit.spawn === 'function';
@@ -604,8 +627,8 @@ export const Application = () => {
         try {
             const isCockpit = typeof cockpit !== 'undefined' && typeof cockpit.spawn === 'function';
             if (isCockpit) {
-                await cockpit.spawn(['systemctl', 'reload', 'caddy'], { superuser: 'try' });
-                addAlert(_("Sukses"), "success", _("Caddy berhasil di-reload via systemctl"));
+                const service = await reloadCaddyService();
+                addAlert(_("Sukses"), "success", `Caddy berhasil di-reload via systemd (${service})`);
             } else {
                 await caddyRequest('/load', 'POST', rawConfig);
                 addAlert(_("Sukses"), "success", _("Konfigurasi Caddy dimuat ulang via Admin API"));
