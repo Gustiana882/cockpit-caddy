@@ -1,0 +1,39 @@
+# Caddy German translations
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: caddy 1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2022-03-09 16:09+0100\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=n != 1\n"
+
+#: src/index.html:20
+msgid "Cockpit Caddy"
+msgstr "Cockpit Caddy"
+
+#: src/app.jsx:43
+msgid "Running on $0"
+msgstr "Läuft auf $0"
+
+#: org.cockpit-project.caddy.metainfo.xml:6
+msgid "Manage Caddy reverse proxy routes"
+msgstr "Caddy-Reverse-Proxy-Routen verwalten"
+
+#: org.cockpit-project.caddy.metainfo.xml:8
+msgid "Manage Caddy reverse proxy and static site routes from Cockpit."
+msgstr "Caddy-Reverse-Proxy- und statische Website-Routen in Cockpit verwalten."
+
+#: src/manifest.json:0 org.cockpit-project.caddy.metainfo.xml:5
+msgid "Caddy Proxy"
+msgstr "Caddy-Proxy"
+
+#: src/app.jsx:29
+msgid "Unknown"
+msgstr "Unbekannt"

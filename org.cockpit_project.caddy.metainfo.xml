@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>org.cockpit_project.caddy</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>Caddy Proxy</name>
+  <summary>Manage Caddy reverse proxy routes</summary>
+  <description>
+    <p>
+      Manage Caddy reverse proxy and static site routes from Cockpit.
+    </p>
+  </description>
+  <extends>org.cockpit_project.cockpit</extends>
+  <launchable type="cockpit-manifest">caddy</launchable>
+  <url type="homepage">https://github.com/Gustiana882/cockpit-caddy</url>
+  <url type="bugtracker">https://github.com/Gustiana882/cockpit-caddy/issues</url>
+  <developer id="org.gustiana882">
+    <name>Gustiana882</name>
+  </developer>
+</component>
