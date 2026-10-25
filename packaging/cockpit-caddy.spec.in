@@ -51,7 +51,7 @@ Caddy reverse proxy management for Cockpit
 rm -rf dist
 # HACK: node module packaging is broken in Fedora ≤ 43; should be in
 # common location, not major version specific one
-NODE_ENV=production NODE_PATH=/usr/lib/node_modules:$(echo /usr/lib/node_modules_*) ./build.js
+NODE_ENV=production NODE_PATH=/usr/lib/node_modules:$(echo /usr/lib/node_modules_*) node ./build.js
 %else
 # Use pre-built bundle on distributions without nodejs-esbuild
 %endif
