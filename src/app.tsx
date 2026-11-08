@@ -34,7 +34,6 @@ import { Table, Thead, Tbody, Tr, Th, Td, ActionsColumn } from '@patternfly/reac
 // PatternFly Icons
 import SyncAltIcon from '@patternfly/react-icons/dist/esm/icons/sync-alt-icon.js';
 import PlusCircleIcon from '@patternfly/react-icons/dist/esm/icons/plus-circle-icon.js';
-import RedoIcon from '@patternfly/react-icons/dist/esm/icons/redo-icon.js';
 import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon.js';
 import CheckCircleIcon from '@patternfly/react-icons/dist/esm/icons/check-circle-icon.js';
 import ExclamationCircleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-circle-icon.js';
@@ -83,29 +82,6 @@ interface NotificationAlert {
 }
 
 const CADDY_API_BASE = 'http://127.0.0.1:2019';
-
-async function reloadCaddyService(): Promise<string> {
-    const services = ['caddy-api', 'caddy'];
-    const probeErrors: string[] = [];
-    let activeService: string | undefined;
-
-    for (const service of services) {
-        try {
-            await cockpit.spawn(['systemctl', 'is-active', '--quiet', service], { superuser: 'try' });
-            activeService = service;
-            break;
-        } catch (err: any) {
-            probeErrors.push(`${service}: ${err.message || String(err)}`);
-        }
-    }
-
-    if (!activeService) {
-        throw new Error(`No active Caddy systemd service found. Checked ${services.join(' and ')}. ${probeErrors.join('; ')}`);
-    }
-
-    await cockpit.spawn(['systemctl', 'reload', activeService], { superuser: 'try' });
-    return activeService;
-}
 
 async function caddyRequest(path: string, method: string = 'GET', data: any = null): Promise<any> {
     const url = `${CADDY_API_BASE}${path}`;
@@ -621,24 +597,6 @@ export const Application = () => {
         }
     };
 
-    // Reload Caddy
-    const handleReloadCaddy = async () => {
-        addAlert(_("Memuat ulang Caddy..."), "info");
-        try {
-            const isCockpit = typeof cockpit !== 'undefined' && typeof cockpit.spawn === 'function';
-            if (isCockpit) {
-                const service = await reloadCaddyService();
-                addAlert(_("Sukses"), "success", `Caddy berhasil di-reload via systemd (${service})`);
-            } else {
-                await caddyRequest('/load', 'POST', rawConfig);
-                addAlert(_("Sukses"), "success", _("Konfigurasi Caddy dimuat ulang via Admin API"));
-            }
-            await loadConfig();
-        } catch (err: any) {
-            addAlert(_("Gagal reload Caddy"), "danger", err.message);
-        }
-    };
-
     // Save Raw Config JSON
     const handleSaveRawConfig = async () => {
         setSavingRaw(true);
@@ -876,11 +834,6 @@ export const Application = () => {
                                     <ToolbarItem>
                                         <Button variant="primary" icon={<PlusCircleIcon />} onClick={openAddModal}>
                                             {_("Tambah rute")}
-                                        </Button>
-                                    </ToolbarItem>
-                                    <ToolbarItem align={{ default: 'alignEnd' }}>
-                                        <Button variant="secondary" icon={<RedoIcon />} onClick={handleReloadCaddy}>
-                                            {_("Reload Caddy")}
                                         </Button>
                                     </ToolbarItem>
                                     <ToolbarItem>
